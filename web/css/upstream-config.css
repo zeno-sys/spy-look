@@ -88,6 +88,14 @@
       border: 1px solid var(--line);
       margin-bottom: 10px;
     }
+    input.input-invalid {
+      border-color: rgba(185, 28, 28, 0.55);
+      background: #fff8f8;
+    }
+    button.primary:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
     .row2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -155,6 +163,9 @@
       font-weight: 700;
     }
     .badge-def { background: rgba(34, 197, 94, 0.15); color: var(--ok); }
+    .badge-ok { background: rgba(34, 197, 94, 0.15); color: var(--ok); }
+    .badge-err { background: rgba(254, 226, 226, 0.95); color: var(--err); }
+    .badge-pending { background: rgba(251, 191, 36, 0.22); color: #92400e; }
     .badge-off { background: rgba(148, 163, 184, 0.2); color: #64748b; }
     .test-json {
       margin: 0;
@@ -203,7 +214,33 @@
     .test-summary.ok { color: var(--ok); }
     .test-summary.err { color: var(--err); }
     #testBackdrop { z-index: 1050; }
+    #appIdBackdrop { z-index: 1040; }
     #createBackdrop { z-index: 1030; }
+    .gw-app-id-cell { min-width: 200px; }
+    .gw-app-id-inner {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .gw-app-id-display {
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: 100%;
+      word-break: break-all;
+    }
+    .gw-app-id-edit-btn {
+      flex-shrink: 0;
+      padding: 4px 10px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .modal-error {
+      color: var(--err);
+      font-size: 12px;
+      font-weight: 600;
+      margin: -2px 0 8px;
+    }
     .modal-card.modal-wide { width: min(720px, 100%); }
     .panel-head {
       display: flex;
@@ -216,18 +253,29 @@
     .panel-head h2 { margin: 0; }
     #toast {
       position: fixed;
-      right: 16px;
-      bottom: 16px;
-      background: rgba(19, 34, 56, 0.92);
+      left: 50%;
+      top: 50%;
+      right: auto;
+      bottom: auto;
+      transform: translate(-50%, -50%) scale(0.96);
+      max-width: min(440px, calc(100vw - 40px));
+      background: rgba(19, 34, 56, 0.94);
       color: #fff;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 12px;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.45;
+      text-align: center;
       opacity: 0;
-      transition: opacity .2s;
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
       z-index: 1200;
+      box-shadow: 0 12px 32px rgba(19, 34, 56, 0.28);
     }
-    #toast.show { opacity: 1; }
+    #toast.show {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
     .modal-backdrop {
       display: none;
       position: fixed;

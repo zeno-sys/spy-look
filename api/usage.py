@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
+
+APP_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
+LEGACY_UNKNOWN_APP_ID = "unknown"
 
 logger = logging.getLogger("spy_look")
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -24,6 +28,7 @@ CREATE TABLE IF NOT EXISTS spy_look_logs (
     request_body TEXT,
     response_body TEXT,
     session_id TEXT NOT NULL DEFAULT 'default',
+    app_id TEXT NOT NULL DEFAULT 'unknown',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -47,9 +52,72 @@ CREATE_CLIENT_KEYS_SQL = """
 CREATE TABLE IF NOT EXISTS spy_look_client_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     api_key TEXT NOT NULL UNIQUE,
+    app_id TEXT NOT NULL UNIQUE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
+
+
+def validate_app_id(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text or not APP_ID_RE.fullmatch(text):
+        raise ValueError(
+            "app_id 须为 1–64 位，以字母或数字开头，仅可含字母、数字、点、下划线、连字符"
+        )
+    return text
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(r[1]) for r in rows}
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    key_cols = _table_columns(conn, "spy_look_client_keys")
+    if "app_id" not in key_cols:
+        conn.execute("ALTER TABLE spy_look_client_keys ADD COLUMN app_id TEXT")
+    log_cols = _table_columns(conn, "spy_look_logs")
+    if "app_id" not in log_cols:
+        conn.execute(
+            "ALTER TABLE spy_look_logs ADD COLUMN app_id TEXT NOT NULL DEFAULT 'unknown'"
+        )
+    conn.execute(
+        """
+        UPDATE spy_look_logs
+        SET app_id = ?
+        WHERE app_id IS NULL OR app_id = ''
+        """,
+        (LEGACY_UNKNOWN_APP_ID,),
+    )
+    legacy_rows = conn.execute(
+        """
+        SELECT id FROM spy_look_client_keys
+        WHERE app_id IS NULL OR app_id = ''
+        """
+    ).fetchall()
+    for (key_id,) in legacy_rows:
+        conn.execute(
+            "UPDATE spy_look_client_keys SET app_id = ? WHERE id = ?",
+            (f"legacy-key-{key_id}", key_id),
+        )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_spy_look_client_keys_app_id
+        ON spy_look_client_keys (app_id)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_spy_look_logs_app_created
+        ON spy_look_logs (app_id, created_at)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_spy_look_logs_app_session
+        ON spy_look_logs (app_id, session_id)
+        """
+    )
 
 
 def setup_logging() -> None:
@@ -68,8 +136,8 @@ def log_event(event: dict[str, Any]) -> None:
             INSERT INTO spy_look_logs (
                 path, model, status_code, latency_ms, client_ip,
                 input_tokens, output_tokens, total_tokens,
-                request_body, response_body, session_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                request_body, response_body, session_id, app_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event.get("path"),
@@ -83,6 +151,7 @@ def log_event(event: dict[str, Any]) -> None:
                 _to_json_text(event.get("request_body")),
                 _to_json_text(event.get("response_body")),
                 event.get("session_id") or "default",
+                event.get("app_id") or LEGACY_UNKNOWN_APP_ID,
             ),
         )
 
@@ -103,6 +172,7 @@ def query_logs(
     path: str | None = None,
     model: str | None = None,
     client_ip: str | None = None,
+    app_id: str | None = None,
     session_id: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
@@ -115,7 +185,7 @@ def query_logs(
     SELECT
         id, path, model, status_code, latency_ms, client_ip,
         input_tokens, output_tokens, total_tokens,
-        request_body, response_body, session_id, created_at
+        request_body, response_body, session_id, app_id, created_at
     FROM spy_look_logs
     """
     clauses: list[str] = []
@@ -130,6 +200,9 @@ def query_logs(
     if client_ip:
         clauses.append("client_ip = ?")
         params.append(client_ip)
+    if app_id:
+        clauses.append("app_id = ?")
+        params.append(app_id)
     if session_id:
         clauses.append("session_id = ?")
         params.append(session_id)
@@ -160,19 +233,19 @@ def delete_log(log_id: int) -> bool:
         return cur.rowcount > 0
 
 
-def list_log_sessions(
+def list_log_apps(
     *, limit: int = 50, offset: int = 0
 ) -> tuple[list[dict[str, Any]], int]:
-    """Distinct session_id with counts; paginated. Returns (rows, total_distinct_sessions)."""
-    count_sql = "SELECT COUNT(DISTINCT session_id) FROM spy_look_logs"
+    """Distinct app_id with counts; paginated."""
+    count_sql = "SELECT COUNT(DISTINCT app_id) FROM spy_look_logs"
     data_sql = """
     SELECT
-        session_id,
+        app_id,
         COUNT(*) AS log_count,
         MIN(created_at) AS first_created_at,
         MAX(created_at) AS last_created_at
     FROM spy_look_logs
-    GROUP BY session_id
+    GROUP BY app_id
     ORDER BY last_created_at DESC
     LIMIT ? OFFSET ?
     """
@@ -183,11 +256,39 @@ def list_log_sessions(
     return [dict(row) for row in rows], total
 
 
+def list_log_sessions(
+    *, app_id: str, limit: int = 50, offset: int = 0
+) -> tuple[list[dict[str, Any]], int]:
+    """Distinct session_id for one app_id; paginated."""
+    aid = validate_app_id(app_id)
+    count_sql = (
+        "SELECT COUNT(DISTINCT session_id) FROM spy_look_logs WHERE app_id = ?"
+    )
+    data_sql = """
+    SELECT
+        session_id,
+        COUNT(*) AS log_count,
+        MIN(created_at) AS first_created_at,
+        MAX(created_at) AS last_created_at
+    FROM spy_look_logs
+    WHERE app_id = ?
+    GROUP BY session_id
+    ORDER BY last_created_at DESC
+    LIMIT ? OFFSET ?
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        total = int(conn.execute(count_sql, (aid,)).fetchone()[0])
+        rows = conn.execute(data_sql, (aid, limit, offset)).fetchall()
+    return [dict(row) for row in rows], total
+
+
 def _init_db() -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(CREATE_LOGS_SQL)
         conn.execute(CREATE_UPSTREAMS_SQL)
         conn.execute(CREATE_CLIENT_KEYS_SQL)
+        _migrate_schema(conn)
 
 
 def _client_keys_count(conn: sqlite3.Connection) -> int:
@@ -219,7 +320,7 @@ def list_client_keys_meta() -> list[dict[str, Any]]:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT id, api_key, created_at
+            SELECT id, api_key, app_id, created_at
             FROM spy_look_client_keys
             ORDER BY id ASC
             """
@@ -243,30 +344,56 @@ def get_client_key_plain(key_id: int) -> str | None:
     return str(row[0] or "")
 
 
-def client_api_key_is_valid(provided_key: str) -> bool:
+def resolve_app_id_by_api_key(provided_key: str) -> str | None:
     text = str(provided_key or "").strip()
     if not text:
-        return False
+        return None
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute(
-            "SELECT 1 FROM spy_look_client_keys WHERE api_key = ? LIMIT 1",
+            "SELECT app_id FROM spy_look_client_keys WHERE api_key = ? LIMIT 1",
             (text,),
         ).fetchone()
-    return row is not None
+    if not row:
+        return None
+    app_id = str(row[0] or "").strip()
+    return app_id or LEGACY_UNKNOWN_APP_ID
 
 
-def add_client_key(api_key: str) -> int:
+def client_api_key_is_valid(provided_key: str) -> bool:
+    return resolve_app_id_by_api_key(provided_key) is not None
+
+
+def add_client_key(api_key: str, app_id: str) -> int:
     text = str(api_key or "").strip()
     if not text:
         raise ValueError("api_key must be non-empty")
+    aid = validate_app_id(app_id)
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute(
-                "INSERT INTO spy_look_client_keys (api_key) VALUES (?)", (text,)
+                "INSERT INTO spy_look_client_keys (api_key, app_id) VALUES (?, ?)",
+                (text, aid),
             )
             return int(cur.lastrowid)
     except sqlite3.IntegrityError as exc:
+        msg = str(exc).lower()
+        if "app_id" in msg:
+            raise ValueError("该 app_id 已存在") from exc
         raise ValueError("该 API Key 已存在") from exc
+
+
+def update_client_key_app_id(key_id: int, app_id: str) -> None:
+    aid = validate_app_id(app_id)
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.execute(
+                "UPDATE spy_look_client_keys SET app_id = ? WHERE id = ?",
+                (aid, key_id),
+            )
+            if cur.rowcount == 0:
+                raise LookupError("client key not found")
+    except sqlite3.IntegrityError as exc:
+        raise ValueError("该 app_id 已存在") from exc
 
 
 def delete_client_key(key_id: int) -> None:

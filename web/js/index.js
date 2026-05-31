@@ -6,6 +6,9 @@ let sortBy = "created_at";
     let modalRawText = "";
     let modalTitleText = "";
     let modalMergedView = false;
+    let appListPage = 1;
+    let appListPageSize = 50;
+    let appListLastCount = 0;
     let sessionListPage = 1;
     let sessionListPageSize = 50;
     let sessionListLastCount = 0;
@@ -21,48 +24,159 @@ let sortBy = "created_at";
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
     }
+    function getAppIdFromUrl() {
+      const raw = new URLSearchParams(window.location.search).get("app_id");
+      if (raw == null) return null;
+      const t = String(raw).trim();
+      return t ? t : null;
+    }
     function getSessionIdFromUrl() {
       const raw = new URLSearchParams(window.location.search).get("session_id");
       if (raw == null) return null;
       const t = String(raw).trim();
       return t ? t : null;
     }
-    function syncUrlSession(sessionId) {
+    function syncUrlQuery(appId, sessionId) {
       const u = new URL(window.location.href);
+      if (appId) u.searchParams.set("app_id", appId);
+      else u.searchParams.delete("app_id");
       if (sessionId) u.searchParams.set("session_id", sessionId);
       else u.searchParams.delete("session_id");
       const qs = u.searchParams.toString();
       history.pushState({}, "", qs ? `${u.pathname}?${qs}` : u.pathname);
     }
     function applyRoute() {
+      const aid = getAppIdFromUrl();
       const sid = getSessionIdFromUrl();
+      const appsEl = document.getElementById("viewApps");
       const sessionsEl = document.getElementById("viewSessions");
       const logsEl = document.getElementById("viewLogs");
+      const appInput = document.getElementById("app_id");
       const sessionInput = document.getElementById("session_id");
-      if (sid) {
-        sessionsEl.classList.add("hidden");
-        logsEl.classList.remove("hidden");
-        sessionInput.value = sid;
-        sessionInput.readOnly = true;
-        document.getElementById("logsSessionHint").textContent = sid;
-        document.title = "Spy-Look · 会话日志";
-        currentPage = 1;
-        updatePagerUI();
-        searchLogs();
-      } else {
-        logsEl.classList.add("hidden");
-        sessionsEl.classList.remove("hidden");
-        sessionInput.readOnly = false;
+      appsEl.classList.add("hidden");
+      sessionsEl.classList.add("hidden");
+      logsEl.classList.add("hidden");
+      if (!aid) {
+        appsEl.classList.remove("hidden");
+        appInput.value = "";
+        appInput.readOnly = false;
         sessionInput.value = "";
+        sessionInput.readOnly = false;
+        document.getElementById("sessionsAppHint").textContent = "";
+        document.getElementById("logsAppHint").textContent = "";
         document.getElementById("logsSessionHint").textContent = "";
+        document.title = "Spy-Look · 应用列表";
+        loadApps();
+        return;
+      }
+      if (!sid) {
+        sessionsEl.classList.remove("hidden");
+        document.getElementById("sessionsAppHint").textContent = aid;
+        sessionInput.value = "";
+        sessionInput.readOnly = false;
+        appInput.value = aid;
+        appInput.readOnly = true;
         document.title = "Spy-Look · 会话列表";
         loadSessions();
+        return;
       }
+      logsEl.classList.remove("hidden");
+      appInput.value = aid;
+      appInput.readOnly = true;
+      sessionInput.value = sid;
+      sessionInput.readOnly = true;
+      document.getElementById("logsAppHint").textContent = aid;
+      document.getElementById("logsSessionHint").textContent = sid;
+      document.title = "Spy-Look · 会话日志";
+      currentPage = 1;
+      updatePagerUI();
+      searchLogs();
+    }
+    function goBackToApps() {
+      appListPage = 1;
+      sessionListPage = 1;
+      syncUrlQuery(null, null);
+      applyRoute();
     }
     function goBackToSessions() {
+      const aid = getAppIdFromUrl();
       sessionListPage = 1;
-      syncUrlSession(null);
+      syncUrlQuery(aid, null);
       applyRoute();
+    }
+    function updateAppListPagerUI() {
+      document.getElementById("appPageInfo").textContent = `第 ${appListPage} 页`;
+      document.getElementById("appPrevPageBtn").disabled = appListPage <= 1;
+      document.getElementById("appNextPageBtn").disabled =
+        appListLastCount < appListPageSize;
+    }
+    function onAppListPageSizeChange() {
+      const raw = document.getElementById("appPageSize").value;
+      const parsed = Number(raw);
+      appListPageSize = Number.isFinite(parsed) && parsed > 0 ? parsed : 50;
+      appListPage = 1;
+      loadApps();
+    }
+    function goAppListPrevPage() {
+      if (appListPage <= 1) return;
+      appListPage -= 1;
+      loadApps();
+    }
+    function goAppListNextPage() {
+      if (appListLastCount < appListPageSize) return;
+      appListPage += 1;
+      loadApps();
+    }
+    function openSessionsForApp(appId) {
+      syncUrlQuery(appId, null);
+      applyRoute();
+    }
+    function openSessionsForAppFromRow(tr) {
+      const aid = tr && tr.dataset && tr.dataset.appId;
+      if (aid) openSessionsForApp(aid);
+    }
+    function openSessionsForAppFromBtn(btn, ev) {
+      if (ev) ev.stopPropagation();
+      const aid = btn && btn.dataset && btn.dataset.appId;
+      if (aid) openSessionsForApp(aid);
+    }
+    async function loadApps() {
+      const tbody = document.getElementById("appTbody");
+      tbody.innerHTML = "<tr><td colspan='5'>加载中...</td></tr>";
+      try {
+        const params = new URLSearchParams();
+        params.set("limit", String(appListPageSize));
+        params.set("offset", String((appListPage - 1) * appListPageSize));
+        const res = await fetch("/logs/apps?" + params.toString());
+        const data = await res.json();
+        const total = Number(data.total) || 0;
+        const maxPage = Math.max(1, Math.ceil(total / appListPageSize) || 1);
+        if (appListPage > maxPage) {
+          appListPage = maxPage;
+          return loadApps();
+        }
+        const items = data.items || [];
+        appListLastCount = items.length;
+        updateAppListPagerUI();
+        tbody.innerHTML = items.length
+          ? items
+              .map(
+                (item) => `
+        <tr class="link-row" data-app-id="${escAttr(item.app_id)}" onclick="openSessionsForAppFromRow(this)">
+          <td><code>${esc(item.app_id)}</code></td>
+          <td>${esc(item.log_count)}</td>
+          <td>${esc(item.first_created_at)}</td>
+          <td>${esc(item.last_created_at)}</td>
+          <td><button type="button" class="ghost-btn action-btn" data-app-id="${escAttr(item.app_id)}" onclick="openSessionsForAppFromBtn(this, event)">查看会话</button></td>
+        </tr>`
+              )
+              .join("")
+          : "<tr><td colspan='5'>暂无应用</td></tr>";
+      } catch (_) {
+        appListLastCount = 0;
+        updateAppListPagerUI();
+        tbody.innerHTML = "<tr><td colspan='5'>加载失败</td></tr>";
+      }
     }
     function updateSessionListPagerUI() {
       document.getElementById("sessionPageInfo").textContent = `第 ${sessionListPage} 页`;
@@ -88,7 +202,9 @@ let sortBy = "created_at";
       loadSessions();
     }
     function openLogsForSession(sessionId) {
-      syncUrlSession(sessionId);
+      const aid = getAppIdFromUrl();
+      if (!aid) return;
+      syncUrlQuery(aid, sessionId);
       applyRoute();
     }
     function openLogsForSessionFromRow(tr) {
@@ -101,10 +217,16 @@ let sortBy = "created_at";
       if (sid) openLogsForSession(sid);
     }
     async function loadSessions() {
+      const aid = getAppIdFromUrl();
       const tbody = document.getElementById("sessionTbody");
+      if (!aid) {
+        tbody.innerHTML = "<tr><td colspan='5'>缺少 app_id</td></tr>";
+        return;
+      }
       tbody.innerHTML = "<tr><td colspan='5'>加载中...</td></tr>";
       try {
         const params = new URLSearchParams();
+        params.set("app_id", aid);
         params.set("limit", String(sessionListPageSize));
         params.set("offset", String((sessionListPage - 1) * sessionListPageSize));
         const res = await fetch("/logs/sessions?" + params.toString());
@@ -142,12 +264,14 @@ let sortBy = "created_at";
       const params = new URLSearchParams();
       const path = document.getElementById("path").value.trim();
       const model = document.getElementById("model").value.trim();
+      const appId = document.getElementById("app_id").value.trim();
       const sessionId = document.getElementById("session_id").value.trim();
       const clientIp = document.getElementById("client_ip").value.trim();
       const startTime = document.getElementById("start_time").value.trim();
       const endTime = document.getElementById("end_time").value.trim();
       if (path) params.set("path", path);
       if (model) params.set("model", model);
+      if (appId) params.set("app_id", appId);
       if (sessionId) params.set("session_id", sessionId);
       if (clientIp) params.set("client_ip", clientIp);
       if (startTime) params.set("start_time", startTime);
@@ -204,8 +328,9 @@ let sortBy = "created_at";
       if (!ok) return;
       try {
         const res = await fetch(`/logs/${logId}`, { method: "DELETE" });
+        const delData = await res.json().catch(() => ({}));
         if (!res.ok) {
-          showToast("删除失败");
+          showToast(formatApiError(delData, "删除失败"));
           return;
         }
         showToast("删除成功");
@@ -247,12 +372,37 @@ let sortBy = "created_at";
       copyText(text);
     }
     let toastTimer = null;
+    function formatApiError(data, fallback) {
+      if (data == null) return fallback;
+      if (typeof data === "string" && data.trim()) return data.trim();
+      if (typeof data !== "object") return fallback;
+      if (typeof data.detail === "string" && data.detail.trim()) return data.detail.trim();
+      const err = data.error;
+      if (err && typeof err === "object") {
+        if (typeof err.message === "string" && err.message.trim()) return err.message.trim();
+      }
+      if (Array.isArray(data.detail)) {
+        const parts = data.detail
+          .map((item) => {
+            if (typeof item === "string") return item;
+            if (item && typeof item.msg === "string") return item.msg;
+            return "";
+          })
+          .filter(Boolean);
+        if (parts.length) return parts.join("；");
+      }
+      return fallback;
+    }
+
     function showToast(message) {
       const toast = document.getElementById("toast");
-      toast.textContent = message;
+      if (!toast) return;
+      const text = String(message ?? "");
+      toast.textContent = text;
       toast.classList.add("show");
+      const duration = Math.min(5000, Math.max(1200, 1000 + text.length * 35));
       if (toastTimer) clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove("show"), 1200);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), duration);
     }
     function showModalFromButton(btn) {
       const title = btn?.dataset?.title || "";
@@ -388,7 +538,7 @@ let sortBy = "created_at";
     async function searchLogs() {
       updateSortIndicators();
       const tbody = document.getElementById("tbody");
-      tbody.innerHTML = "<tr><td colspan='12'>加载中...</td></tr>";
+      tbody.innerHTML = "<tr><td colspan='13'>加载中...</td></tr>";
       const res = await fetch("/logs?" + buildParams());
       const data = await res.json();
       const items = data.items || [];
@@ -401,6 +551,7 @@ let sortBy = "created_at";
           <td>${statusBadge(item.status_code)}</td>
           <td>${esc(item.latency_ms)} ms</td>
           <td>${esc(item.client_ip)}</td>
+          <td><code>${esc(item.app_id)}</code></td>
           <td>${esc(item.session_id)}</td>
           <td>${esc(item.input_tokens)}/${esc(item.output_tokens)}/${esc(item.total_tokens)}</td>
           <td><button class="ghost-btn action-btn" onclick="showModalFromButton(this)" data-title="request_body" data-payload="${escAttr(toEncodedPayload(item.request_body))}">查看</button></td>
@@ -409,7 +560,7 @@ let sortBy = "created_at";
           <td>${esc(item.created_at)}</td>
         </tr>
       `).join("");
-      tbody.innerHTML = rows || "<tr><td colspan='12'>暂无数据</td></tr>";
+      tbody.innerHTML = rows || "<tr><td colspan='13'>暂无数据</td></tr>";
       updatePagerUI();
     }
     function showModal(title, raw) {

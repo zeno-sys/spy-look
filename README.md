@@ -8,7 +8,8 @@ uv run main.py
 
 Spy-Look 是一个面向 OpenAI 兼容接口的轻量网关：对外提供稳定的 `/v1/*` 入口，对内转发到上游模型服务，并补齐认证、错误归一化、可观测日志与简易管理能力。
 
-另外，还支持会话功能，使用会话功能只需在请求体中增加 `session_id` 字段即可。
+- **应用维度**：在「上游配置」为每条对外 API Key 绑定全局唯一的 **`app_id`**（标识下游服务）；网关按 Key 解析并写入日志，观测页按 **应用 → 会话 → 日志** 三级浏览。
+- **会话维度**：对话请求可在 body 中增加 **`session_id`**，用于在同一应用内区分多路对话（不转发上游）。
 
 ---
 
@@ -44,9 +45,10 @@ Spy-Look 是一个面向 OpenAI 兼容接口的轻量网关：对外提供稳定
 - `GET /v1/models`
 - `POST /v1/chat/completions`
 - `GET /healthz`
-- `GET /logs` / `DELETE /logs/{log_id}`（网关内部观测面；`GET /logs` 支持 `session_id` 等过滤与分页）
-- `GET /logs/sessions`（按会话聚合的列表，支持 `limit` / `offset` 分页，返回 `total`）
-- `GET /`（内置观测页面：先会话列表，点进会话后再看该会话下的请求日志；URL 使用 `?session_id=...` 与日志视图同步）
+- `GET /logs` / `DELETE /logs/{log_id}`（观测面；`GET /logs` 支持 `app_id`、`session_id` 等过滤与分页）
+- `GET /logs/apps`（按 `app_id` 聚合的应用列表）
+- `GET /logs/sessions?app_id=`（**必填** `app_id`；按会话聚合）
+- `GET /`（内置观测页：**应用列表** → `?app_id=` 会话列表 → `?app_id=&session_id=` 请求日志）
 
 ---
 
@@ -63,7 +65,7 @@ Spy-Look 是一个面向 OpenAI 兼容接口的轻量网关：对外提供稳定
 ### 3.2 鉴权层（`api/auth.py`）
 
 - 校验 `Authorization` 头格式与 `Bearer` token。
-- 与 SQLite 表 `spy_look_client_keys` 中**任意一条** `api_key` 匹配即通过；密钥仅通过管理页或自行写库配置，**不从代码常量种子**。
+- 与 SQLite 表 `spy_look_client_keys` 中**任意一条** `api_key` 匹配即通过，并解析该行绑定的 **`app_id`** 用于落库；Key 与 `app_id` 在 `/upstream-config` 配置。
 - 鉴权失败直接返回结构化 `401` 错误，错误码为 `invalid_api_key`。
 
 ### 3.3 上游访问层（`api/upstream_client.py`）
@@ -83,11 +85,10 @@ Spy-Look 是一个面向 OpenAI 兼容接口的轻量网关：对外提供稳定
 ### 3.5 观测与存储层（`api/usage.py` + `web/`）
 
 - 网关对外 Key（`spy_look_client_keys`）与上游（`spy_look_upstreams`）**仅以 SQLite 为准**，通过 `/upstream-config` 管理；无内置默认种子。
-- 请求事件写入 sqlite（`spy_look.db`，位于项目根目录）并输出 JSON 日志；每条记录带 **`session_id`**，用于会话维度隔离。
-- `GET /logs` 支持按路径、模型、IP、**`session_id`**、时间区间过滤与分页；落库的 `request_body` 与上游一致（**不含** `session_id`）。
-- `GET /logs/sessions` 对 `session_id` 做聚合统计（条数、首末时间），供内置页会话列表使用，并与 `limit` / `offset` 分页对齐。
-- 支持按 `id` 删除日志。
-- 内置页面（静态资源在 `web/`，由 FastAPI 托管）：默认进入**会话列表**；选择会话后进入**该会话的请求日志表**（`session_id` 与地址栏 `?session_id=` 同步，便于书签与刷新）。
+- 请求事件写入 sqlite（`spy_look.db`）并输出 JSON 日志；每条记录带 **`app_id`**（来自鉴权 Key）与 **`session_id`**（对话 body 可选字段）。
+- `GET /logs` 支持按路径、模型、IP、**`app_id`**、**`session_id`**、时间区间过滤与分页。
+- `GET /logs/apps` / `GET /logs/sessions?app_id=` 供内置页三级导航。
+- 内置页面默认**应用列表**；URL 使用 `?app_id=`、`?session_id=` 与视图同步。
 
 ---
 
@@ -131,7 +132,7 @@ spy-look/
 2. 从上游 body 提取 `model`、`stream`。
 3. 调用上游 `/chat/completions`（仅携带上游 body）。
 4. 解析响应 JSON；若含 `usage` 则提取 token 统计。
-5. 按统一事件结构落日志（含 request/response body 与 **`session_id`** 列）。
+5. 按统一事件结构落日志（含 **`app_id`**、**`session_id`**、request/response body）。
 6. 若上游报错，做错误归一化后返回；否则透传成功响应。
 
 ### 4.2 流式对话（`stream=true`）
@@ -145,7 +146,7 @@ spy-look/
 
 ### 4.3 模型列表
 
-- 直接代理 `/models`，并记录访问事件（不含 token 数据）；观测落库的 **`session_id` 固定为 `default`**（与对话会话无关）。
+- 直接代理 `/models`，并记录访问事件（不含 token 数据）；落库 **`app_id`** 来自鉴权 Key，**`session_id` 固定为 `default`**。
 - 对上游错误走统一归一化策略。
 
 ---
@@ -155,20 +156,24 @@ spy-look/
 日志表 `spy_look_logs` 的核心字段：
 
 - 请求维度：`path`, `model`, `client_ip`
-- **会话维度：`session_id`**（文本；对话请求**未带** `session_id` **或为空字符串**时网关记为 **`default`**）
+- **应用维度：`app_id`**（文本；由对外 API Key 配置决定，写入时快照，不来自请求 body）
+- **会话维度：`session_id`**（文本；对话**未带**或为空时记为 **`default`**）
 - 结果维度：`status_code`, `latency_ms`
 - token 维度：`input_tokens`, `output_tokens`, `total_tokens`
 - 内容维度：`request_body`, `response_body`（与上游一致；**对话**类请求体中不会出现网关扩展字段 `session_id`）
 - 时间维度：`created_at`
 
-**调用约定（对话）**：客户端可在 `POST /v1/chat/completions` 的 JSON 根级增加 **`session_id`** 字符串，用于在库内区分多路对话或租户会话；网关**不会**把它转发给上游。未传或传空字符串时，日志归入 **`default`** 会话桶。
+**配置约定（应用）**：在 `/upstream-config` 为每条网关 API Key 填写全局唯一的 **`app_id`**（如 `billing-service`）。同一下游服务应使用固定 `app_id`；多环境可用不同 `app_id`（如 `billing-staging`）。
+
+**调用约定（对话）**：客户端可在 `POST /v1/chat/completions` 的 JSON 根级增加 **`session_id`**，用于在同一 `app_id` 下区分多路对话；网关**不会**转发给上游。未传或为空时归入 **`default`** 会话桶。
 
 **观测 API 摘要**：
 
 | 接口 | 作用 |
 |------|------|
-| `GET /logs` | 分页查询原始日志行；Query 含 `session_id` 时只返回该会话 |
-| `GET /logs/sessions` | 按 `session_id` 聚合列表；Query：`limit`（默认 50，最大 200）、`offset`；响应含 `items`、`total`、`limit`、`offset` |
+| `GET /logs/apps` | 按 `app_id` 聚合；`limit` / `offset` / `total` |
+| `GET /logs/sessions` | **必填** `app_id`；按 `session_id` 聚合 |
+| `GET /logs` | 分页查询；可选 `app_id`、`session_id` 等 |
 | `DELETE /logs/{log_id}` | 按主键删除一条日志 |
 
 已有库会通过表结构定义自动创建；首次启动生成 `spy_look.db`。

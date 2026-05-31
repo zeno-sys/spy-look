@@ -8,11 +8,66 @@
 </head>
 <body>
   <div class="page">
-    <div id="viewSessions" class="view-panel">
+    <div id="viewApps" class="view-panel">
+      <div class="masthead">
+        <div>
+          <p class="brand-kicker">Editorial Ops Desk</p>
+          <h2>Spy-Look · 应用列表</h2>
+        </div>
+        <div class="masthead-actions">
+          <span class="brand-note">按下游服务（app_id）浏览；点击进入会话与请求日志</span>
+          <a class="ghost-btn action-btn" href="/upstream-config" style="text-decoration:none;display:inline-block;">上游配置</a>
+          <button class="ghost-btn action-btn" type="button" onclick="openClientInfoModal()">对外调用</button>
+          <button class="ghost-btn action-btn" type="button" onclick="loadApps()">刷新</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="row" style="grid-template-columns: 1fr auto;">
+          <p class="muted" style="margin:0; font-size:13px; align-self:center;">按最近活动时间排序；点击整行进入该应用下的会话列表。</p>
+        </div>
+        <div class="pager">
+          <div class="pager-left">
+            <span>每页</span>
+            <select id="appPageSize" onchange="onAppListPageSizeChange()">
+              <option value="20">20</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+            <span>个应用</span>
+          </div>
+          <div class="pager-right">
+            <button class="ghost-btn action-btn" id="appPrevPageBtn" type="button" onclick="goAppListPrevPage()">上一页</button>
+            <span id="appPageInfo">第 1 页</span>
+            <button class="ghost-btn action-btn" id="appNextPageBtn" type="button" onclick="goAppListNextPage()">下一页</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table-sessions">
+          <thead>
+            <tr>
+              <th>app_id</th>
+              <th>日志条数</th>
+              <th>首条时间</th>
+              <th>最近时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="appTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="viewSessions" class="view-panel hidden">
       <div class="masthead">
         <div>
           <p class="brand-kicker">Editorial Ops Desk</p>
           <h2>Spy-Look · 会话列表</h2>
+          <div class="logs-context">
+            <span>当前应用</span>
+            <code id="sessionsAppHint"></code>
+            <button class="ghost-btn action-btn" type="button" onclick="goBackToApps()">← 返回应用列表</button>
+          </div>
         </div>
         <div class="masthead-actions">
           <span class="brand-note">选择会话后查看该会话下的请求日志</span>
@@ -64,7 +119,9 @@
           <p class="brand-kicker">Editorial Ops Desk</p>
           <h2>Spy-Look · 会话日志</h2>
           <div class="logs-context">
-            <span>当前会话</span>
+            <span>应用</span>
+            <code id="logsAppHint"></code>
+            <span>会话</span>
             <code id="logsSessionHint"></code>
             <button class="ghost-btn action-btn" type="button" onclick="goBackToSessions()">← 返回会话列表</button>
           </div>
@@ -79,6 +136,7 @@
         <div class="row">
           <input id="path" placeholder="path 子串筛选（如 /v1/chat 或完整 URL 片段）" value="/v1/chat/completions" />
           <input id="model" placeholder="model，例如 gpt-4o-mini" />
+          <input id="app_id" placeholder="app_id" title="由应用列表进入，与 URL 同步" readonly />
           <input id="session_id" placeholder="session_id" title="由会话列表进入，与 URL 同步" />
           <input id="client_ip" placeholder="client_ip，例如 127.0.0.1" />
           <input id="start_time" type="datetime-local" placeholder="开始时间" />
@@ -111,7 +169,7 @@
               <th>model</th>
               <th class="th-sort" onclick="setSort('status_code')">status <span id="sort-status_code"></span></th>
               <th class="th-sort" onclick="setSort('latency_ms')">latency (ms) <span id="sort-latency_ms"></span></th>
-              <th>client_ip</th><th>session_id</th><th>tokens(in/out/total)</th><th>request_body</th><th>response_body</th><th>action</th>
+              <th>client_ip</th><th>app_id</th><th>session_id</th><th>tokens(in/out/total)</th><th>request_body</th><th>response_body</th><th>action</th>
               <th class="th-sort" onclick="setSort('created_at')">created_at <span id="sort-created_at"></span></th>
             </tr>
           </thead>

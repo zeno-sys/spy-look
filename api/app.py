@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .auth import verify_gateway_key
+from .auth import resolve_gateway_client
 from .errors import (
     normalize_upstream_error,
     openai_error_response,
@@ -32,6 +32,7 @@ from .usage import (
     get_default_upstream_row,
     get_upstream,
     get_upstream_runtime,
+    list_log_apps,
     list_log_sessions,
     list_upstreams,
     log_event,
@@ -39,6 +40,7 @@ from .usage import (
     query_logs,
     set_default_upstream,
     setup_logging,
+    update_client_key_app_id,
     update_upstream,
 )
 
@@ -129,6 +131,7 @@ async def get_logs(
     path: str | None = Query(default=None),
     model: str | None = Query(default=None),
     client_ip: str | None = Query(default=None),
+    app_id: str | None = Query(default=None),
     session_id: str | None = Query(default=None),
     start_time: str | None = Query(default=None),
     end_time: str | None = Query(default=None),
@@ -136,11 +139,12 @@ async def get_logs(
     order_dir: str = Query(default="desc"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-) -> JSONResponse:  
+) -> JSONResponse:
     items = query_logs(
         path=path,
         model=model,
         client_ip=client_ip,
+        app_id=app_id,
         session_id=session_id,
         start_time=start_time,
         end_time=end_time,
@@ -152,12 +156,31 @@ async def get_logs(
     return JSONResponse(content={"items": items, "limit": limit, "offset": offset})
 
 
-@app.get("/logs/sessions")
-async def get_log_sessions(
+@app.get("/logs/apps")
+async def get_log_apps(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> JSONResponse:
-    items, total = list_log_sessions(limit=limit, offset=offset)
+    items, total = list_log_apps(limit=limit, offset=offset)
+    return JSONResponse(
+        content={"items": items, "total": total, "limit": limit, "offset": offset}
+    )
+
+
+@app.get("/logs/sessions")
+async def get_log_sessions(
+    app_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
+    if not app_id or not str(app_id).strip():
+        raise HTTPException(status_code=422, detail="app_id is required")
+    try:
+        items, total = list_log_sessions(
+            app_id=str(app_id).strip(), limit=limit, offset=offset
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(
         content={"items": items, "total": total, "limit": limit, "offset": offset}
     )
@@ -305,10 +328,13 @@ async def admin_add_client_key(request: Request) -> JSONResponse:
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="JSON body must be an object")
     key = str(raw.get("gateway_api_key") or "").strip()
+    app_id = str(raw.get("app_id") or "").strip()
     if not key:
         raise HTTPException(status_code=400, detail="gateway_api_key is required")
+    if not app_id:
+        raise HTTPException(status_code=400, detail="app_id is required")
     try:
-        new_id = add_client_key(key)
+        new_id = add_client_key(key, app_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     plain = get_client_key_plain(new_id) or key
@@ -321,6 +347,22 @@ async def admin_add_client_key(request: Request) -> JSONResponse:
             **get_client_api_key_meta(),
         },
     )
+
+
+@app.patch("/admin/gateway-client-keys/{key_id}")
+async def admin_patch_client_key(key_id: int, request: Request) -> JSONResponse:
+    raw = await read_request_json(request)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    if "app_id" not in raw:
+        raise HTTPException(status_code=400, detail="app_id is required")
+    try:
+        update_client_key_app_id(key_id, str(raw.get("app_id") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="key not found") from exc
+    return JSONResponse(content=get_client_api_key_meta())
 
 
 @app.delete("/admin/gateway-client-keys/{key_id}")
@@ -413,8 +455,10 @@ async def admin_set_default_upstream(request: Request, upstream_id: int) -> JSON
     return JSONResponse(content=row)
 
 
-@app.get("/v1/models", dependencies=[Depends(verify_gateway_key)])
-async def list_models(request: Request) -> JSONResponse:
+@app.get("/v1/models")
+async def list_models(
+    request: Request, app_id: str = Depends(resolve_gateway_client)
+) -> JSONResponse:
     client_ip = request.client.host if request.client else None
     start = time.perf_counter()
     client: UpstreamClient | None = getattr(request.app.state, "upstream_client", None)
@@ -443,6 +487,7 @@ async def list_models(request: Request) -> JSONResponse:
             "request_body": None,
             "response_body": payload,
             "session_id": DEFAULT_LOG_SESSION_ID,
+            "app_id": app_id,
         }
     )
 
@@ -451,12 +496,10 @@ async def list_models(request: Request) -> JSONResponse:
     return JSONResponse(status_code=upstream_response.status_code, content=payload)
 
 
-@app.post(
-    "/v1/chat/completions",
-    dependencies=[Depends(verify_gateway_key)],
-    response_model=None,
-)
-async def create_chat_completions(request: Request) -> JSONResponse | StreamingResponse:
+@app.post("/v1/chat/completions", response_model=None)
+async def create_chat_completions(
+    request: Request, app_id: str = Depends(resolve_gateway_client)
+) -> JSONResponse | StreamingResponse:
     client_ip = request.client.host if request.client else None
     client: UpstreamClient | None = getattr(request.app.state, "upstream_client", None)
     if client is None:
@@ -502,6 +545,7 @@ async def create_chat_completions(request: Request) -> JSONResponse | StreamingR
                             "request_body": upstream_body,
                             "response_body": "".join(response_chunks),
                             "session_id": session_id,
+                            "app_id": app_id,
                         }
                     )
 
@@ -538,6 +582,7 @@ async def create_chat_completions(request: Request) -> JSONResponse | StreamingR
             "request_body": upstream_body,
             "response_body": payload,
             "session_id": session_id,
+            "app_id": app_id,
         }
     )
 

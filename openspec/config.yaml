@@ -1,20 +1,20 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  技术栈：Python（FastAPI）、SQLite、静态 HTML/JS 观测页。
+  文档与 OpenSpec 变更制品（proposal、design、tasks）使用简体中文撰写；
+  保留 API 路径、字段名、代码标识符等英文原文。
+  规格（specs）中：章节用 `## ADDED Requirements` 等英文 delta 标题；每条 `### Requirement:` 正文须含英文 MUST 或 SHALL（可与中文混写，不可用「必须」单独替代）；`#### Scenario:` 可用中文描述，保留 WHEN/THEN 标记。
+  proposal 须含英文章节 `## Why`、`## What Changes`（正文可中文）。
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  proposal:
+    - 使用英文章节标题 `## Why`、`## What Changes`；正文使用简体中文
+  design:
+    - 全文使用简体中文
+  specs:
+    - 使用英文 delta 章节标题（如 `## ADDED Requirements`），保留 `### Requirement:`、`#### Scenario:` 及 WHEN/THEN 结构标记
+    - 每条 Requirement 正文 MUST 包含英文关键字 MUST 或 SHALL（规范性约束不可仅用中文「必须」「应当」）
+    - 允许中英混排，例如：「网关 MUST 要求非空 app_id」；场景步骤描述可用简体中文
+  tasks:
+    - 任务描述使用简体中文

@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from fastapi import Header, HTTPException
 
-from .usage import client_api_key_is_valid
+from .usage import resolve_app_id_by_api_key
 
 
-def verify_gateway_key(authorization: str | None = Header(default=None)) -> None:
+def resolve_gateway_client(authorization: str | None = Header(default=None)) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise_auth_error("Missing or invalid Authorization header")
 
     provided_key = authorization.removeprefix("Bearer ").strip()
-    if not client_api_key_is_valid(provided_key):
+    app_id = resolve_app_id_by_api_key(provided_key)
+    if not app_id:
         raise_auth_error("Invalid API key")
+    return app_id
 
 
 def raise_auth_error(message: str) -> None:

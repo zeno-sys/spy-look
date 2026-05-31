@@ -261,22 +261,28 @@
     .danger-btn:hover { background: #ffe9e9; }
     #toast {
       position: fixed;
-      right: 16px;
-      bottom: 16px;
-      background: rgba(19, 34, 56, 0.92);
+      left: 50%;
+      top: 50%;
+      right: auto;
+      bottom: auto;
+      transform: translate(-50%, -50%) scale(0.96);
+      max-width: min(440px, calc(100vw - 40px));
+      background: rgba(19, 34, 56, 0.94);
       color: #fff;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 12px;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.45;
+      text-align: center;
       opacity: 0;
-      transform: translateY(4px);
       pointer-events: none;
-      transition: opacity .2s ease, transform .2s ease;
+      transition: opacity 0.2s ease, transform 0.2s ease;
       z-index: 1200;
+      box-shadow: 0 12px 32px rgba(19, 34, 56, 0.28);
     }
     #toast.show {
       opacity: 1;
-      transform: translateY(0);
+      transform: translate(-50%, -50%) scale(1);
     }
     .json-code {
       margin: 0;

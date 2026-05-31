@@ -1,8 +1,34 @@
-function toast(msg) {
+function formatApiError(data, fallback) {
+      if (data == null) return fallback;
+      if (typeof data === "string" && data.trim()) return data.trim();
+      if (typeof data !== "object") return fallback;
+      if (typeof data.detail === "string" && data.detail.trim()) return data.detail.trim();
+      const err = data.error;
+      if (err && typeof err === "object") {
+        if (typeof err.message === "string" && err.message.trim()) return err.message.trim();
+      }
+      if (Array.isArray(data.detail)) {
+        const parts = data.detail
+          .map((item) => {
+            if (typeof item === "string") return item;
+            if (item && typeof item.msg === "string") return item.msg;
+            return "";
+          })
+          .filter(Boolean);
+        if (parts.length) return parts.join("；");
+      }
+      return fallback;
+    }
+
+    function toast(msg) {
       const el = document.getElementById("toast");
-      el.textContent = msg;
+      if (!el) return;
+      const text = String(msg ?? "");
+      el.textContent = text;
       el.classList.add("show");
-      setTimeout(() => el.classList.remove("show"), 1600);
+      const duration = Math.min(5000, Math.max(1600, 1200 + text.length * 35));
+      if (toast._timer) clearTimeout(toast._timer);
+      toast._timer = setTimeout(() => el.classList.remove("show"), duration);
     }
     function renderGatewayKeyRows(items) {
       const tb = document.getElementById("gwKeyTbody");
@@ -14,6 +40,12 @@ function toast(msg) {
               (k) => `
             <tr>
               <td>${k.id}</td>
+              <td class="gw-app-id-cell">
+                <div class="gw-app-id-inner">
+                  <code class="gw-app-id-display" data-key-id="${k.id}">${escapeHtml(k.app_id || "")}</code>
+                  <button class="ghost gw-app-id-edit-btn" type="button" title="修改 app_id" onclick="editGatewayAppId(${k.id})">编辑</button>
+                </div>
+              </td>
               <td><code>${escapeHtml(k.api_key_masked || "")}</code></td>
               <td>${escapeHtml(k.created_at || "—")}</td>
               <td>
@@ -25,7 +57,7 @@ function toast(msg) {
             </tr>`
             )
             .join("")
-        : "<tr><td colspan='4' class='muted'>尚无对外 API Key，请在下方「添加」写入数据库</td></tr>";
+        : "<tr><td colspan='5' class='muted'>尚无对外 API Key，请在下方「添加」写入数据库</td></tr>";
     }
 
     async function loadGatewayClientKeys() {
@@ -35,12 +67,12 @@ function toast(msg) {
         const res = await fetch("/admin/gateway-client-keys");
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          tb.innerHTML = "<tr><td colspan='4'>读取失败</td></tr>";
+          tb.innerHTML = "<tr><td colspan='5'>读取失败</td></tr>";
           return;
         }
         renderGatewayKeyRows(data.items || []);
       } catch (_) {
-        tb.innerHTML = "<tr><td colspan='4'>读取失败</td></tr>";
+        tb.innerHTML = "<tr><td colspan='5'>读取失败</td></tr>";
       }
     }
 
@@ -54,7 +86,7 @@ function toast(msg) {
         const res = await fetch(`/admin/gateway-client-keys/${id}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          toast(typeof data.detail === "string" ? data.detail : "读取失败");
+          toast(formatApiError(data, "读取失败"));
           return;
         }
         const text = data.api_key || "";
@@ -79,7 +111,7 @@ function toast(msg) {
         const res = await fetch(`/admin/gateway-client-keys/${id}`, { method: "DELETE" });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          toast(typeof data.detail === "string" ? data.detail : "删除失败");
+          toast(formatApiError(data, "删除失败"));
           return;
         }
         toast("已删除");
@@ -89,9 +121,110 @@ function toast(msg) {
       }
     }
 
+    let editAppIdKeyId = null;
+
+    function setAppIdEditError(message) {
+      const el = document.getElementById("appIdEditError");
+      if (!el) return;
+      if (message) {
+        el.textContent = message;
+        el.hidden = false;
+      } else {
+        el.textContent = "";
+        el.hidden = true;
+      }
+    }
+
+    function openEditAppIdModal(id, currentAppId) {
+      editAppIdKeyId = id;
+      const hint = document.getElementById("appIdKeyHint");
+      if (hint) hint.textContent = `正在修改对外密钥 id=${id} 的应用标识`;
+      const input = document.getElementById("app_id_edit_input");
+      if (input) {
+        input.value = currentAppId || "";
+        input.classList.remove("input-invalid");
+      }
+      setAppIdEditError("");
+      const bd = document.getElementById("appIdBackdrop");
+      if (!bd) return;
+      bd.classList.add("open");
+      bd.setAttribute("aria-hidden", "false");
+      requestAnimationFrame(() => {
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      });
+    }
+
+    function closeEditAppIdModal() {
+      const bd = document.getElementById("appIdBackdrop");
+      if (bd) {
+        bd.classList.remove("open");
+        bd.setAttribute("aria-hidden", "true");
+      }
+      editAppIdKeyId = null;
+      setAppIdEditError("");
+      const input = document.getElementById("app_id_edit_input");
+      if (input) input.classList.remove("input-invalid");
+    }
+
+    function editGatewayAppId(id) {
+      const el = document.querySelector(`.gw-app-id-display[data-key-id="${id}"]`);
+      const current = el ? el.textContent.trim() : "";
+      openEditAppIdModal(id, current);
+    }
+
+    async function submitEditAppId(ev) {
+      if (ev) ev.preventDefault();
+      const id = editAppIdKeyId;
+      if (!id) return;
+      const input = document.getElementById("app_id_edit_input");
+      const trimmed = input ? String(input.value || "").trim() : "";
+      if (!trimmed) {
+        if (input) input.classList.add("input-invalid");
+        setAppIdEditError("app_id 不能为空");
+        if (input) input.focus();
+        return;
+      }
+      if (input) input.classList.remove("input-invalid");
+      setAppIdEditError("");
+      const saveBtn = document.querySelector("#appIdEditForm button[type='submit']");
+      if (saveBtn) saveBtn.disabled = true;
+      try {
+        const res = await fetch(`/admin/gateway-client-keys/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ app_id: trimmed }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg = formatApiError(data, "更新失败");
+          setAppIdEditError(msg);
+          if (input) input.classList.add("input-invalid");
+          return;
+        }
+        toast("app_id 已更新");
+        closeEditAppIdModal();
+        renderGatewayKeyRows(data.items || []);
+      } catch (_) {
+        setAppIdEditError("请求失败，请稍后重试");
+      } finally {
+        if (saveBtn) saveBtn.disabled = false;
+      }
+    }
+
+    document.getElementById("appIdBackdrop")?.addEventListener("click", () => closeEditAppIdModal());
+
     async function addGatewayClientKey() {
+      const appInput = document.getElementById("gw_app_id_input");
       const input = document.getElementById("gw_client_key_input");
+      const appId = (appInput && appInput.value) ? appInput.value.trim() : "";
       const v = (input && input.value) ? input.value.trim() : "";
+      if (!appId) {
+        toast("请输入 app_id");
+        return;
+      }
       if (!v) {
         toast("请输入要添加的 API Key");
         return;
@@ -100,20 +233,81 @@ function toast(msg) {
         const res = await fetch("/admin/gateway-client-keys", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ gateway_api_key: v }),
+          body: JSON.stringify({ gateway_api_key: v, app_id: appId }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          toast(typeof data.detail === "string" ? data.detail : "添加失败");
+          toast(formatApiError(data, "添加失败"));
           return;
         }
         toast("已添加");
         input.value = "";
+        if (appInput) appInput.value = "";
         renderGatewayKeyRows(data.items || []);
       } catch (_) {
         toast("请求失败");
       }
     }
+    function upstreamProbeHint(data) {
+      if (!data || typeof data !== "object") return "无法连接上游";
+      if (data.error) return String(data.error);
+      if (data.upstream_status_code != null) {
+        return `上游 HTTP ${data.upstream_status_code}`;
+      }
+      return "上游返回异常";
+    }
+
+    function renderUpstreamStatusBadge(u, probe) {
+      if (!u.enabled) {
+        return '<span class="badge badge-off">已禁用</span>';
+      }
+      if (!probe || probe.pending) {
+        return '<span class="badge badge-pending">检测中</span>';
+      }
+      if (probe.ok) {
+        return '<span class="badge badge-ok" title="拉取 /models 成功">可用</span>';
+      }
+      const hint = escapeHtml(probe.hint || "不可用");
+      return `<span class="badge badge-err" title="${hint}">不可用</span>`;
+    }
+
+    function setUpstreamStatusCell(id, html) {
+      const cell = document.querySelector(
+        `tr[data-upstream-id="${id}"] td.upstream-status-cell`
+      );
+      if (cell) cell.innerHTML = html;
+    }
+
+    async function probeUpstreamRow(u) {
+      if (!u.enabled) return;
+      try {
+        const res = await fetch("/admin/upstreams/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: Number(u.id) }),
+        });
+        const data = await res.json().catch(() => ({}));
+        const ok = res.ok && data.ok === true;
+        setUpstreamStatusCell(
+          u.id,
+          renderUpstreamStatusBadge(u, {
+            ok,
+            hint: ok ? "" : upstreamProbeHint(data),
+          })
+        );
+      } catch (e) {
+        setUpstreamStatusCell(
+          u.id,
+          renderUpstreamStatusBadge(u, { ok: false, hint: String(e) })
+        );
+      }
+    }
+
+    async function probeAllEnabledUpstreams(items) {
+      const enabled = (items || []).filter((u) => u.enabled);
+      await Promise.all(enabled.map((u) => probeUpstreamRow(u)));
+    }
+
     async function loadList() {
       const tb = document.getElementById("tbody");
       tb.innerHTML = "<tr><td colspan='9'>加载中…</td></tr>";
@@ -135,15 +329,19 @@ function toast(msg) {
                 : (isLive
                   ? '<button class="ghost" type="button" disabled title="当前仅此一条对外转发">当前对外</button>'
                   : '<button class="ghost" type="button" disabled title="请先启用该上游">切为对外</button>');
+              const statusCell = renderUpstreamStatusBadge(
+                u,
+                u.enabled ? { pending: true } : null
+              );
               return `
-            <tr>
+            <tr data-upstream-id="${u.id}">
               <td>${u.id}</td>
               <td>${escapeHtml(u.name)}</td>
               <td><code>${escapeHtml(u.base_url)}</code></td>
               <td>${escapeHtml(u.api_key_masked || "")}</td>
               <td>${escapeHtml(u.timeout_seconds)}</td>
               <td>${u.trust_env ? "是" : "否"}</td>
-              <td>${u.enabled ? "" : '<span class="badge badge-off">已禁用</span>'}</td>
+              <td class="upstream-status-cell">${statusCell}</td>
               <td>${extCell}</td>
               <td>
                 <div class="actions">
@@ -156,6 +354,9 @@ function toast(msg) {
             </tr>`;
             }).join("")
           : "<tr><td colspan='9'>暂无上游；请在「新增上游」中填写（仅存本地 SQLite）</td></tr>";
+        if (items.length) {
+          probeAllEnabledUpstreams(items);
+        }
       } catch (e) {
         tb.innerHTML = "<tr><td colspan='9'>加载失败</td></tr>";
         toast("加载失败");
@@ -205,7 +406,7 @@ function toast(msg) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          toast(data.detail || "创建失败");
+          toast(formatApiError(data, "创建失败"));
           return;
         }
         toast("已保存");
@@ -312,6 +513,16 @@ function toast(msg) {
           paintTestModal(ok ? "连接成功" : "上游返回错误", line, ok ? "ok" : "err", "plain", data);
         }
         toast(ok ? "连接成功" : "上游返回错误");
+        const rowItem = { id: Number(payload.id), enabled: true };
+        if (payload.id != null) {
+          setUpstreamStatusCell(
+            payload.id,
+            renderUpstreamStatusBadge(rowItem, {
+              ok,
+              hint: ok ? "" : upstreamProbeHint(data),
+            })
+          );
+        }
       } catch (e) {
         paintTestModal("请求异常", null, null, "plain", String(e));
         toast("请求失败");
@@ -392,6 +603,10 @@ function toast(msg) {
         closeTestModal();
         return;
       }
+      if (document.getElementById("appIdBackdrop").classList.contains("open")) {
+        closeEditAppIdModal();
+        return;
+      }
       if (document.getElementById("createBackdrop").classList.contains("open")) {
         closeCreateModal();
         return;
@@ -449,7 +664,7 @@ function toast(msg) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          toast(typeof data.detail === "string" ? data.detail : "更新失败");
+          toast(formatApiError(data, "更新失败"));
           return;
         }
         if (wantDefault && !editWasDefault) {

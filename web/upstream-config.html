@@ -34,6 +34,7 @@
           <thead>
             <tr>
               <th>id</th>
+              <th>app_id</th>
               <th>脱敏</th>
               <th>创建时间</th>
               <th>操作</th>
@@ -42,7 +43,9 @@
           <tbody id="gwKeyTbody"></tbody>
         </table>
       </div>
-      <label for="gw_client_key_input" style="margin-top:14px;">新增 API Key</label>
+      <label for="gw_app_id_input" style="margin-top:14px;">app_id（全局唯一，标识下游服务）</label>
+      <input id="gw_app_id_input" type="text" placeholder="例如 billing-service" autocomplete="off" />
+      <label for="gw_client_key_input" style="margin-top:10px;">新增 API Key</label>
       <input id="gw_client_key_input" type="password" placeholder="粘贴后点击「添加」" autocomplete="off" />
       <div class="actions" style="margin-top:10px;">
         <button class="primary" type="button" onclick="addGatewayClientKey()">添加</button>
@@ -134,6 +137,30 @@
       <div class="modal-foot">
         <button class="primary" type="button" onclick="closeTestModal()">关闭</button>
       </div>
+    </div>
+  </div>
+
+  <div id="appIdBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-labelledby="appIdModalTitle" onclick="event.stopPropagation()">
+      <h3 id="appIdModalTitle">修改 app_id</h3>
+      <p class="modal-hint" id="appIdKeyHint"></p>
+      <form id="appIdEditForm" onsubmit="submitEditAppId(event)">
+        <label for="app_id_edit_input">app_id（全局唯一，标识下游服务）</label>
+        <input
+          id="app_id_edit_input"
+          type="text"
+          placeholder="例如 billing-service"
+          autocomplete="off"
+          spellcheck="false"
+          required
+        />
+        <p class="modal-hint">以字母或数字开头，可含字母、数字、点、下划线、连字符，长度 1–64。</p>
+        <p id="appIdEditError" class="modal-error" hidden></p>
+        <div class="modal-foot">
+          <button class="ghost" type="button" onclick="closeEditAppIdModal()">取消</button>
+          <button class="primary" type="submit">保存</button>
+        </div>
+      </form>
     </div>
   </div>
 
