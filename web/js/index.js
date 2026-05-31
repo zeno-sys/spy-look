@@ -140,6 +140,32 @@ let sortBy = "created_at";
       const aid = btn && btn.dataset && btn.dataset.appId;
       if (aid) openSessionsForApp(aid);
     }
+    async function deleteAppFromBtn(btn, ev) {
+      if (ev) ev.stopPropagation();
+      const aid = btn?.dataset?.appId;
+      const count = btn?.dataset?.logCount;
+      if (!aid) return;
+      const countHint = count ? ` ${count} 条` : "全部";
+      const ok = window.confirm(
+        `确认删除应用「${aid}」下的${countHint}日志吗？此操作不可恢复。`
+      );
+      if (!ok) return;
+      try {
+        const res = await fetch(`/logs/apps/${encodeURIComponent(aid)}`, {
+          method: "DELETE",
+        });
+        const delData = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showToast(formatApiError(delData, "删除失败"));
+          return;
+        }
+        showToast(`已删除 ${delData.deleted_count ?? count ?? ""} 条日志`);
+        if (appListLastCount === 1 && appListPage > 1) appListPage -= 1;
+        await loadApps();
+      } catch (_) {
+        showToast("删除失败");
+      }
+    }
     async function loadApps() {
       const tbody = document.getElementById("appTbody");
       tbody.innerHTML = "<tr><td colspan='5'>加载中...</td></tr>";
@@ -167,7 +193,10 @@ let sortBy = "created_at";
           <td>${esc(item.log_count)}</td>
           <td>${esc(item.first_created_at)}</td>
           <td>${esc(item.last_created_at)}</td>
-          <td><button type="button" class="ghost-btn action-btn" data-app-id="${escAttr(item.app_id)}" onclick="openSessionsForAppFromBtn(this, event)">查看会话</button></td>
+          <td class="table-actions">
+            <button type="button" class="ghost-btn action-btn" data-app-id="${escAttr(item.app_id)}" onclick="openSessionsForAppFromBtn(this, event)">查看会话</button>
+            <button type="button" class="danger-btn action-btn" data-app-id="${escAttr(item.app_id)}" data-log-count="${escAttr(item.log_count)}" onclick="deleteAppFromBtn(this, event)">删除</button>
+          </td>
         </tr>`
               )
               .join("")
@@ -216,6 +245,36 @@ let sortBy = "created_at";
       const sid = btn && btn.dataset && btn.dataset.sessionId;
       if (sid) openLogsForSession(sid);
     }
+    async function deleteSessionFromBtn(btn, ev) {
+      if (ev) ev.stopPropagation();
+      const aid = getAppIdFromUrl();
+      const sid = btn?.dataset?.sessionId;
+      const count = btn?.dataset?.logCount;
+      if (!aid || !sid) return;
+      const countHint = count ? ` ${count} 条` : "全部";
+      const ok = window.confirm(
+        `确认删除会话「${sid}」下的${countHint}日志吗？此操作不可恢复。`
+      );
+      if (!ok) return;
+      try {
+        const params = new URLSearchParams();
+        params.set("app_id", aid);
+        params.set("session_id", sid);
+        const res = await fetch(`/logs/sessions?${params.toString()}`, {
+          method: "DELETE",
+        });
+        const delData = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showToast(formatApiError(delData, "删除失败"));
+          return;
+        }
+        showToast(`已删除 ${delData.deleted_count ?? count ?? ""} 条日志`);
+        if (sessionListLastCount === 1 && sessionListPage > 1) sessionListPage -= 1;
+        await loadSessions();
+      } catch (_) {
+        showToast("删除失败");
+      }
+    }
     async function loadSessions() {
       const aid = getAppIdFromUrl();
       const tbody = document.getElementById("sessionTbody");
@@ -249,7 +308,10 @@ let sortBy = "created_at";
           <td>${esc(item.log_count)}</td>
           <td>${esc(item.first_created_at)}</td>
           <td>${esc(item.last_created_at)}</td>
-          <td><button type="button" class="ghost-btn action-btn" data-session-id="${escAttr(item.session_id)}" onclick="openLogsForSessionFromBtn(this, event)">查看日志</button></td>
+          <td class="table-actions">
+            <button type="button" class="ghost-btn action-btn" data-session-id="${escAttr(item.session_id)}" onclick="openLogsForSessionFromBtn(this, event)">查看日志</button>
+            <button type="button" class="danger-btn action-btn" data-session-id="${escAttr(item.session_id)}" data-log-count="${escAttr(item.log_count)}" onclick="deleteSessionFromBtn(this, event)">删除</button>
+          </td>
         </tr>`
               )
               .join("")
@@ -653,13 +715,13 @@ let sortBy = "created_at";
         `  -H ${bashSingleQuoted("Content-Type: application/json")}`
       );
     }
-    function buildCurlChat(base, key, modelId) {
+    function buildCurlChat(base, key, modelId, sessionId) {
       const root = String(base || "").replace(/\/$/, "");
       const url = `${root}/v1/chat/completions`;
       const body = {
         model: modelId || "YOUR_MODEL_ID",
         messages: [{ role: "user", content: "你好" }],
-        session_id: "default",
+        session_id: sessionId || "default",
       };
       const json = JSON.stringify(body);
       return (
@@ -675,45 +737,68 @@ let sortBy = "created_at";
       document.getElementById("clientInfoMask").style.display = "none";
     }
 
-    async function openClientInfoModal() {
-      const mask = document.getElementById("clientInfoMask");
-      const bodyEl = document.getElementById("clientInfoBody");
-      mask.style.display = "flex";
-      bodyEl.className = "client-info-body muted";
-      bodyEl.textContent = "加载中…";
+    let clientInfoState = {
+      base: "",
+      modelsUrl: "",
+      chatUrl: "",
+      keys: [],
+    };
 
-      let info;
-      try {
-        const res = await fetch("/admin/client-info");
-        info = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const detail =
-            typeof info.detail === "string"
-              ? info.detail
-              : info.detail && typeof info.detail === "object"
-                ? JSON.stringify(info.detail)
-                : res.status;
-          bodyEl.className = "client-info-body";
-          bodyEl.textContent = "无法读取配置：" + detail;
-          return;
-        }
-      } catch (e) {
-        bodyEl.className = "client-info-body";
-        bodyEl.textContent = "请求失败：" + String(e);
+    function resolveDefaultClientKeyId(keys) {
+      const currentAppId = getAppIdFromUrl();
+      if (currentAppId) {
+        const match = keys.find((k) => k.app_id === currentAppId);
+        if (match) return String(match.id);
+      }
+      if (keys.length === 1) return String(keys[0].id);
+      return "";
+    }
+
+    function resolveClientInfoSessionHint(selectedAppId) {
+      const urlAppId = getAppIdFromUrl();
+      const urlSessionId = getSessionIdFromUrl();
+      if (urlAppId && urlSessionId && urlAppId === String(selectedAppId || "").trim()) {
+        return urlSessionId;
+      }
+      return "default";
+    }
+
+    async function renderClientInfoDoc(keyId) {
+      const docEl = document.getElementById("clientInfoDoc");
+      if (!docEl) return;
+      const keyMeta = clientInfoState.keys.find((k) => Number(k.id) === Number(keyId));
+      if (!keyMeta) {
+        docEl.innerHTML = "";
         return;
       }
 
-      const base = info.gateway_base_url || "";
-      const key = info.gateway_api_key || "";
+      docEl.innerHTML = '<p class="muted" style="margin:0;">加载文档中…</p>';
+
+      const base = clientInfoState.base;
+      const modelsUrl = clientInfoState.modelsUrl;
+      const chatUrl = clientInfoState.chatUrl;
+
+      let key = "";
+      try {
+        const res = await fetch(`/admin/gateway-client-keys/${keyId}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          docEl.innerHTML = `<p class="muted" style="margin:0;">无法读取 API Key：${esc(formatApiError(data, "读取失败"))}</p>`;
+          return;
+        }
+        key = String(data.api_key || "").trim();
+      } catch (e) {
+        docEl.innerHTML = `<p class="muted" style="margin:0;">请求失败：${esc(String(e))}</p>`;
+        return;
+      }
+
       const curlKey = key || "YOUR_GATEWAY_API_KEY";
-      const modelsUrl = info.v1_models_url || "";
-      const chatUrl = info.v1_chat_completions_url || "";
+      const sessionHint = resolveClientInfoSessionHint(keyMeta.app_id);
 
       let models = [];
       let modelsErr = null;
       if (!key) {
-        modelsErr =
-          "数据库中尚无对外 API Key，请到「上游配置」页添加后再试。";
+        modelsErr = "未能读取完整 API Key。";
       } else {
         try {
           const r2 = await fetch(modelsUrl, {
@@ -744,7 +829,7 @@ let sortBy = "created_at";
 
       const firstModel = models[0] || "";
       const curlModels = buildCurlModels(base, curlKey);
-      const curlChat = buildCurlChat(base, curlKey, firstModel);
+      const curlChat = buildCurlChat(base, curlKey, firstModel, sessionHint);
 
       const listHtml = models.length
         ? `<ol class="client-model-list">${models.map((id) => `<li><code>${esc(id)}</code></li>`).join("")}</ol>`
@@ -752,9 +837,7 @@ let sortBy = "created_at";
             modelsErr ? "未能拉取模型列表：" + esc(modelsErr) : "（无模型条目，请检查默认上游）"
           }</p>`;
 
-      bodyEl.className = "client-info-body";
-      bodyEl.innerHTML = `
-        <p class="muted" style="margin-top:0;">以下为当前页面对应的网关根 URL；若经反向代理或域名访问，请替换为实际对外地址。</p>
+      docEl.innerHTML = `
         <div class="client-info-section">
           <div class="client-info-label">网关根 URL</div>
           <div class="client-info-value">${esc(base)}</div>
@@ -764,10 +847,12 @@ let sortBy = "created_at";
           <div class="client-info-value">${esc(chatUrl)}</div>
         </div>
         <div class="client-info-section">
+          <div class="client-info-label">app_id（日志归属）</div>
+          <div class="client-info-value"><code>${esc(keyMeta.app_id || "")}</code></div>
           <div class="client-info-label">网关 API Key（请求头 Authorization: Bearer …）</div>
-          <div class="client-info-value" id="clientKeyField"></div>
+          <div class="client-info-value" id="clientKeyField">${esc(key || "（无）")}</div>
           <div class="client-info-row">
-            <button type="button" class="copy-btn" onclick="copyText(document.getElementById('clientKeyField').textContent)">复制 Key</button>
+            <button type="button" class="copy-btn" ${key ? "" : "disabled"} onclick="copyText(document.getElementById('clientKeyField').textContent)">复制 Key</button>
           </div>
         </div>
         <div class="client-info-section">
@@ -778,25 +863,113 @@ let sortBy = "created_at";
           <div class="client-info-label">curl：列举模型</div>
           <div class="client-curl-wrap">
             <button type="button" class="copy-btn" onclick="copyText(document.getElementById('clientInfoCurlModels').textContent)">复制</button>
-            <pre id="clientInfoCurlModels"></pre>
+            <pre id="clientInfoCurlModels">${esc(curlModels)}</pre>
           </div>
         </div>
         <div class="client-info-section">
           <div class="client-info-label">curl：对话补全（含 session_id 便于日志归类）</div>
           <p class="muted" style="margin:0 0 8px;">模型已填${
             firstModel ? "列表首项 <code>" + esc(firstModel) + "</code>" : "占位符 YOUR_MODEL_ID"
-          }，可按需修改。</p>
+          }；session_id 为 <code>${esc(sessionHint)}</code>，可按需修改。</p>
           <div class="client-curl-wrap">
             <button type="button" class="copy-btn" onclick="copyText(document.getElementById('clientInfoCurlChat').textContent)">复制</button>
-            <pre id="clientInfoCurlChat"></pre>
+            <pre id="clientInfoCurlChat">${esc(curlChat)}</pre>
           </div>
         </div>
       `;
-      document.getElementById("clientKeyField").textContent = key
-        ? key
-        : "（无）请在「上游配置」添加对外 API Key（仅存数据库）。";
-      document.getElementById("clientInfoCurlModels").textContent = curlModels;
-      document.getElementById("clientInfoCurlChat").textContent = curlChat;
+    }
+
+    async function onClientInfoKeySelected() {
+      const sel = document.getElementById("clientInfoKeySelect");
+      const keyId = sel?.value;
+      const docEl = document.getElementById("clientInfoDoc");
+      if (!docEl) return;
+      if (!keyId) {
+        docEl.innerHTML = '<p class="muted client-info-placeholder">请选择 app_id 后查看调用文档。</p>';
+        return;
+      }
+      await renderClientInfoDoc(Number(keyId));
+    }
+
+    async function openClientInfoModal() {
+      const mask = document.getElementById("clientInfoMask");
+      const bodyEl = document.getElementById("clientInfoBody");
+      mask.style.display = "flex";
+      bodyEl.className = "client-info-body muted";
+      bodyEl.textContent = "加载中…";
+
+      let info;
+      let keysData;
+      try {
+        const [infoRes, keysRes] = await Promise.all([
+          fetch("/admin/client-info"),
+          fetch("/admin/gateway-client-keys"),
+        ]);
+        info = await infoRes.json().catch(() => ({}));
+        keysData = await keysRes.json().catch(() => ({}));
+        if (!infoRes.ok) {
+          const detail =
+            typeof info.detail === "string"
+              ? info.detail
+              : info.detail && typeof info.detail === "object"
+                ? JSON.stringify(info.detail)
+                : infoRes.status;
+          bodyEl.className = "client-info-body";
+          bodyEl.textContent = "无法读取配置：" + detail;
+          return;
+        }
+        if (!keysRes.ok) {
+          bodyEl.className = "client-info-body";
+          bodyEl.textContent =
+            "无法读取 API Key 列表：" + formatApiError(keysData, String(keysRes.status));
+          return;
+        }
+      } catch (e) {
+        bodyEl.className = "client-info-body";
+        bodyEl.textContent = "请求失败：" + String(e);
+        return;
+      }
+
+      const keys = keysData.items || [];
+      clientInfoState = {
+        base: info.gateway_base_url || "",
+        modelsUrl: info.v1_models_url || "",
+        chatUrl: info.v1_chat_completions_url || "",
+        keys,
+      };
+      const defaultKeyId = resolveDefaultClientKeyId(keys);
+
+      bodyEl.className = "client-info-body";
+      bodyEl.innerHTML = `
+        <p class="muted" style="margin-top:0;">先选择要使用的 <code>app_id</code>（每条对外 API Key 绑定一个 app_id），再生成对应调用文档。若经反向代理或域名访问，请将文档中的 URL 替换为实际对外地址。</p>
+        <div class="client-info-section">
+          <div class="client-info-label">选择 app_id</div>
+          ${
+            keys.length
+              ? `<select id="clientInfoKeySelect" onchange="onClientInfoKeySelected()">
+              <option value="">请选择 app_id …</option>
+              ${keys
+                .map(
+                  (k) =>
+                    `<option value="${escAttr(String(k.id))}"${
+                      String(k.id) === defaultKeyId ? " selected" : ""
+                    }>${esc(k.app_id || "")} · ${esc(k.api_key_masked || "")}</option>`
+                )
+                .join("")}
+            </select>`
+              : `<p class="muted" style="margin:0;">尚无对外 API Key，请到「<a href="/upstream-config">上游配置</a>」页添加。</p>`
+          }
+        </div>
+        <div id="clientInfoDoc">${
+          defaultKeyId
+            ? ""
+            : '<p class="muted client-info-placeholder">请选择 app_id 后查看调用文档。</p>'
+        }</div>
+      `;
+
+      if (defaultKeyId) {
+        await renderClientInfoDoc(Number(defaultKeyId));
+      }
     }
 
     document.addEventListener("keydown", (ev) => {

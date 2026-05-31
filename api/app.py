@@ -23,11 +23,15 @@ from .upstream_client import UpstreamClient, UpstreamRuntimeConfig, upstream_run
 from .usage import (
     add_client_key,
     create_upstream,
+    consume_pending_gateway_key,
     delete_client_key,
     delete_log,
+    delete_logs_by_app,
+    delete_logs_by_session,
     delete_upstream,
     get_client_api_key,
     get_client_api_key_meta,
+    generate_gateway_api_key,
     get_client_key_plain,
     get_default_upstream_row,
     get_upstream,
@@ -38,6 +42,7 @@ from .usage import (
     log_event,
     mask_api_key,
     query_logs,
+    register_pending_gateway_key,
     set_default_upstream,
     setup_logging,
     update_client_key_app_id,
@@ -186,6 +191,50 @@ async def get_log_sessions(
     )
 
 
+@app.delete("/logs/apps/{app_id}")
+async def remove_logs_by_app(app_id: str) -> JSONResponse:
+    try:
+        deleted_count = delete_logs_by_app(app_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail="app not found")
+    return JSONResponse(
+        content={
+            "ok": True,
+            "app_id": str(app_id).strip(),
+            "deleted_count": deleted_count,
+        }
+    )
+
+
+@app.delete("/logs/sessions")
+async def remove_logs_by_session(
+    app_id: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
+) -> JSONResponse:
+    if not app_id or not str(app_id).strip():
+        raise HTTPException(status_code=422, detail="app_id is required")
+    if not session_id or not str(session_id).strip():
+        raise HTTPException(status_code=422, detail="session_id is required")
+    aid = str(app_id).strip()
+    sid = str(session_id).strip()
+    try:
+        deleted_count = delete_logs_by_session(aid, sid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail="session not found")
+    return JSONResponse(
+        content={
+            "ok": True,
+            "app_id": aid,
+            "session_id": sid,
+            "deleted_count": deleted_count,
+        }
+    )
+
+
 @app.delete("/logs/{log_id}")
 async def remove_log(log_id: int) -> JSONResponse:
     deleted = delete_log(log_id)
@@ -322,17 +371,33 @@ async def admin_get_client_key_plain(key_id: int) -> JSONResponse:
     return JSONResponse(content={"id": key_id, "api_key": plain})
 
 
+@app.post("/admin/gateway-client-keys/generate")
+async def admin_generate_gateway_client_key() -> JSONResponse:
+    """生成一条随机对外 API Key（仅返回明文，不入库；供新增弹窗预览）。"""
+    key = generate_gateway_api_key()
+    register_pending_gateway_key(key)
+    return JSONResponse(content={"gateway_api_key": key})
+
+
 @app.post("/admin/gateway-client-keys")
 async def admin_add_client_key(request: Request) -> JSONResponse:
     raw = await read_request_json(request)
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="JSON body must be an object")
-    key = str(raw.get("gateway_api_key") or "").strip()
     app_id = str(raw.get("app_id") or "").strip()
-    if not key:
-        raise HTTPException(status_code=400, detail="gateway_api_key is required")
+    key = str(raw.get("gateway_api_key") or "").strip()
     if not app_id:
         raise HTTPException(status_code=400, detail="app_id is required")
+    if not key:
+        raise HTTPException(
+            status_code=400,
+            detail="gateway_api_key is required; use generate first",
+        )
+    if not consume_pending_gateway_key(key):
+        raise HTTPException(
+            status_code=400,
+            detail="invalid or expired generated key; click regenerate",
+        )
     try:
         new_id = add_client_key(key, app_id)
     except ValueError as exc:

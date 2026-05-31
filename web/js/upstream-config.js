@@ -46,7 +46,7 @@ function formatApiError(data, fallback) {
                   <button class="ghost gw-app-id-edit-btn" type="button" title="修改 app_id" onclick="editGatewayAppId(${k.id})">编辑</button>
                 </div>
               </td>
-              <td><code>${escapeHtml(k.api_key_masked || "")}</code></td>
+              <td><code class="key-masked">${escapeHtml(k.api_key_masked || "")}</code></td>
               <td>${escapeHtml(k.created_at || "—")}</td>
               <td>
                 <div class="actions">
@@ -57,7 +57,7 @@ function formatApiError(data, fallback) {
             </tr>`
             )
             .join("")
-        : "<tr><td colspan='5' class='muted'>尚无对外 API Key，请在下方「添加」写入数据库</td></tr>";
+        : "<tr><td colspan='5' class='muted'>尚无对外 API Key，请点击「新增密钥」</td></tr>";
     }
 
     async function loadGatewayClientKeys() {
@@ -76,9 +76,72 @@ function formatApiError(data, fallback) {
       }
     }
 
-    function focusNewGatewayKey() {
-      const input = document.getElementById("gw_client_key_input");
-      if (input) input.focus();
+    function setGwKeyCreateError(message) {
+      const el = document.getElementById("gwKeyCreateError");
+      if (!el) return;
+      if (message) {
+        el.textContent = message;
+        el.hidden = false;
+      } else {
+        el.textContent = "";
+        el.hidden = true;
+      }
+    }
+
+    async function openCreateGatewayKeyModal() {
+      const form = document.getElementById("gwKeyCreateForm");
+      if (form) form.reset();
+      setGwKeyCreateError("");
+      const bd = document.getElementById("gwKeyCreateBackdrop");
+      if (!bd) return;
+      bd.classList.add("open");
+      bd.setAttribute("aria-hidden", "false");
+      await generateGatewayApiKey();
+      requestAnimationFrame(() => {
+        const appInput = document.getElementById("gw_create_app_id");
+        if (appInput) appInput.focus();
+      });
+    }
+
+    function closeCreateGatewayKeyModal() {
+      const bd = document.getElementById("gwKeyCreateBackdrop");
+      if (bd) {
+        bd.classList.remove("open");
+        bd.setAttribute("aria-hidden", "true");
+      }
+      setGwKeyCreateError("");
+    }
+
+    document.getElementById("gwKeyCreateBackdrop")?.addEventListener("click", () =>
+      closeCreateGatewayKeyModal()
+    );
+
+    async function generateGatewayApiKey() {
+      const input = document.getElementById("gw_create_key");
+      const btn = document.getElementById("gw_generate_key_btn");
+      if (btn) btn.disabled = true;
+      setGwKeyCreateError("");
+      try {
+        const res = await fetch("/admin/gateway-client-keys/generate", { method: "POST" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setGwKeyCreateError(formatApiError(data, "生成失败"));
+          return;
+        }
+        const key = String(data.gateway_api_key || "").trim();
+        if (!key) {
+          setGwKeyCreateError("服务端未返回密钥");
+          return;
+        }
+        if (input) {
+          input.value = key;
+        }
+        toast("已生成 API Key");
+      } catch (_) {
+        setGwKeyCreateError("请求失败，请稍后重试");
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     async function copyGatewayClientKey(id) {
@@ -216,36 +279,56 @@ function formatApiError(data, fallback) {
 
     document.getElementById("appIdBackdrop")?.addEventListener("click", () => closeEditAppIdModal());
 
-    async function addGatewayClientKey() {
-      const appInput = document.getElementById("gw_app_id_input");
-      const input = document.getElementById("gw_client_key_input");
-      const appId = (appInput && appInput.value) ? appInput.value.trim() : "";
-      const v = (input && input.value) ? input.value.trim() : "";
+    async function onCreateGatewayKey(ev) {
+      if (ev) ev.preventDefault();
+      const appInput = document.getElementById("gw_create_app_id");
+      const keyInput = document.getElementById("gw_create_key");
+      const appId = appInput ? String(appInput.value || "").trim() : "";
+      const key = keyInput ? String(keyInput.value || "").trim() : "";
       if (!appId) {
-        toast("请输入 app_id");
+        if (appInput) appInput.classList.add("input-invalid");
+        setGwKeyCreateError("app_id 不能为空");
+        if (appInput) appInput.focus();
         return;
       }
-      if (!v) {
-        toast("请输入要添加的 API Key");
+      if (appInput) appInput.classList.remove("input-invalid");
+      if (!key) {
+        setGwKeyCreateError("请等待密钥生成，或点击「重新生成」");
+        await generateGatewayApiKey();
         return;
       }
+      if (keyInput) keyInput.classList.remove("input-invalid");
+      setGwKeyCreateError("");
+      const saveBtn = document.querySelector("#gwKeyCreateForm button[type='submit']");
+      if (saveBtn) saveBtn.disabled = true;
       try {
         const res = await fetch("/admin/gateway-client-keys", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ gateway_api_key: v, app_id: appId }),
+          body: JSON.stringify({ app_id: appId, gateway_api_key: key }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          toast(formatApiError(data, "添加失败"));
+          setGwKeyCreateError(formatApiError(data, "保存失败"));
           return;
         }
-        toast("已添加");
-        input.value = "";
-        if (appInput) appInput.value = "";
+        const plain = String(data.api_key || "").trim();
+        if (plain) {
+          try {
+            await navigator.clipboard.writeText(plain);
+            toast("已添加，完整 Key 已复制到剪贴板");
+          } catch (_) {
+            window.prompt("已添加，请妥善保存完整 Key（仅此一次）：", plain);
+          }
+        } else {
+          toast("已添加");
+        }
+        closeCreateGatewayKeyModal();
         renderGatewayKeyRows(data.items || []);
       } catch (_) {
-        toast("请求失败");
+        setGwKeyCreateError("请求失败，请稍后重试");
+      } finally {
+        if (saveBtn) saveBtn.disabled = false;
       }
     }
     function upstreamProbeHint(data) {
@@ -255,6 +338,32 @@ function formatApiError(data, fallback) {
         return `上游 HTTP ${data.upstream_status_code}`;
       }
       return "上游返回异常";
+    }
+
+    function renderSwitchButton(u, probe) {
+      const btnStyle = 'padding:7px 12px;font-size:12px;';
+      const isLive = !!u.is_default && !!u.enabled;
+      if (isLive) {
+        return `<button class="ghost" type="button" disabled title="当前仅此一条对外转发">当前对外</button>`;
+      }
+      if (!u.enabled) {
+        return `<button class="ghost" type="button" disabled title="请先启用该上游">切为对外</button>`;
+      }
+      if (!probe || probe.pending) {
+        return `<button class="primary" type="button" disabled style="${btnStyle}" title="正在检测上游可用性">切为对外</button>`;
+      }
+      if (!probe.ok) {
+        const hint = escapeHtml(probe.hint || "上游不可用");
+        return `<button class="primary" type="button" disabled style="${btnStyle}" title="${hint}">切为对外</button>`;
+      }
+      return `<button class="primary" type="button" style="${btnStyle}" onclick="setDefault(${u.id})">切为对外</button>`;
+    }
+
+    function setUpstreamSwitchButton(u, probe) {
+      const wrap = document.querySelector(
+        `tr[data-upstream-id="${u.id}"] .upstream-switch-wrap`
+      );
+      if (wrap) wrap.innerHTML = renderSwitchButton(u, probe);
     }
 
     function renderUpstreamStatusBadge(u, probe) {
@@ -295,11 +404,16 @@ function formatApiError(data, fallback) {
             hint: ok ? "" : upstreamProbeHint(data),
           })
         );
+        setUpstreamSwitchButton(u, {
+          ok,
+          hint: ok ? "" : upstreamProbeHint(data),
+        });
       } catch (e) {
         setUpstreamStatusCell(
           u.id,
           renderUpstreamStatusBadge(u, { ok: false, hint: String(e) })
         );
+        setUpstreamSwitchButton(u, { ok: false, hint: String(e) });
       }
     }
 
@@ -323,12 +437,10 @@ function formatApiError(data, fallback) {
                 : (u.is_default && !u.enabled
                   ? '<span class="badge badge-off" title="已禁用，网关不会选用">标记默认但未启用</span>'
                   : '<span class="muted">—</span>');
-              const canSwitch = !!u.enabled && !u.is_default;
-              const switchBtn = canSwitch
-                ? `<button class="primary" type="button" style="padding:7px 12px;font-size:12px;" onclick="setDefault(${u.id})">切为对外</button>`
-                : (isLive
-                  ? '<button class="ghost" type="button" disabled title="当前仅此一条对外转发">当前对外</button>'
-                  : '<button class="ghost" type="button" disabled title="请先启用该上游">切为对外</button>');
+              const switchBtn = renderSwitchButton(
+                u,
+                u.enabled ? { pending: true } : null
+              );
               const statusCell = renderUpstreamStatusBadge(
                 u,
                 u.enabled ? { pending: true } : null
@@ -338,7 +450,7 @@ function formatApiError(data, fallback) {
               <td>${u.id}</td>
               <td>${escapeHtml(u.name)}</td>
               <td><code>${escapeHtml(u.base_url)}</code></td>
-              <td>${escapeHtml(u.api_key_masked || "")}</td>
+              <td><span class="key-masked">${escapeHtml(u.api_key_masked || "")}</span></td>
               <td>${escapeHtml(u.timeout_seconds)}</td>
               <td>${u.trust_env ? "是" : "否"}</td>
               <td class="upstream-status-cell">${statusCell}</td>
@@ -346,7 +458,7 @@ function formatApiError(data, fallback) {
               <td>
                 <div class="actions">
                   <button class="ghost" type="button" onclick="testById(${u.id})">可用模型</button>
-                  ${switchBtn}
+                  <span class="upstream-switch-wrap">${switchBtn}</span>
                   <button class="ghost" type="button" onclick="editRow(${u.id})">编辑</button>
                   <button class="ghost danger" type="button" onclick="removeRow(${u.id})">删除</button>
                 </div>

@@ -373,6 +373,16 @@
       gap: 8px;
       margin-top: 6px;
     }
+    .client-info-body select#clientInfoKeySelect {
+      width: 100%;
+      max-width: 100%;
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+    .client-info-placeholder {
+      margin: 0;
+      padding: 12px 0 4px;
+    }
     .client-model-list {
       margin: 8px 0 0;
       padding-left: 1.25rem;
@@ -417,6 +427,13 @@
     .link-row { cursor: pointer; }
     .link-row:hover { background: rgba(31, 111, 235, 0.08) !important; }
     table.table-sessions { min-width: 720px; }
+    .table-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
     @media (max-width: 840px) {
       body { padding: 14px; }
       h2 { font-size: 23px; }

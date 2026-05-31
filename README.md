@@ -46,8 +46,8 @@ Spy-Look 是一个面向 OpenAI 兼容接口的轻量网关：对外提供稳定
 - `POST /v1/chat/completions`
 - `GET /healthz`
 - `GET /logs` / `DELETE /logs/{log_id}`（观测面；`GET /logs` 支持 `app_id`、`session_id` 等过滤与分页）
-- `GET /logs/apps`（按 `app_id` 聚合的应用列表）
-- `GET /logs/sessions?app_id=`（**必填** `app_id`；按会话聚合）
+- `GET /logs/apps` / `DELETE /logs/apps/{app_id}`（按 `app_id` 聚合的应用列表 / 删除该应用下全部日志）
+- `GET /logs/sessions?app_id=` / `DELETE /logs/sessions?app_id=&session_id=`（**必填** `app_id`；按会话聚合 / 删除指定会话下全部日志）
 - `GET /`（内置观测页：**应用列表** → `?app_id=` 会话列表 → `?app_id=&session_id=` 请求日志）
 
 ---
@@ -172,7 +172,9 @@ spy-look/
 | 接口 | 作用 |
 |------|------|
 | `GET /logs/apps` | 按 `app_id` 聚合；`limit` / `offset` / `total` |
+| `DELETE /logs/apps/{app_id}` | 删除该 `app_id` 下全部日志 |
 | `GET /logs/sessions` | **必填** `app_id`；按 `session_id` 聚合 |
+| `DELETE /logs/sessions` | **必填** `app_id` 与 `session_id`；删除该会话下全部日志 |
 | `GET /logs` | 分页查询；可选 `app_id`、`session_id` 等 |
 | `DELETE /logs/{log_id}` | 按主键删除一条日志 |
 

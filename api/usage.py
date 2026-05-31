@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +56,13 @@ CREATE TABLE IF NOT EXISTS spy_look_client_keys (
     api_key TEXT NOT NULL UNIQUE,
     app_id TEXT NOT NULL UNIQUE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+CREATE_PENDING_GATEWAY_KEYS_SQL = """
+CREATE TABLE IF NOT EXISTS spy_look_pending_gateway_keys (
+    api_key TEXT PRIMARY KEY,
+    expires_at REAL NOT NULL
 );
 """
 
@@ -233,6 +242,30 @@ def delete_log(log_id: int) -> bool:
         return cur.rowcount > 0
 
 
+def delete_logs_by_app(app_id: str) -> int:
+    aid = str(app_id or "").strip()
+    if not aid:
+        raise ValueError("app_id is required")
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute("DELETE FROM spy_look_logs WHERE app_id = ?", (aid,))
+        return int(cur.rowcount)
+
+
+def delete_logs_by_session(app_id: str, session_id: str) -> int:
+    aid = str(app_id or "").strip()
+    sid = str(session_id or "").strip()
+    if not aid:
+        raise ValueError("app_id is required")
+    if not sid:
+        raise ValueError("session_id is required")
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            "DELETE FROM spy_look_logs WHERE app_id = ? AND session_id = ?",
+            (aid, sid),
+        )
+        return int(cur.rowcount)
+
+
 def list_log_apps(
     *, limit: int = 50, offset: int = 0
 ) -> tuple[list[dict[str, Any]], int]:
@@ -288,6 +321,7 @@ def _init_db() -> None:
         conn.execute(CREATE_LOGS_SQL)
         conn.execute(CREATE_UPSTREAMS_SQL)
         conn.execute(CREATE_CLIENT_KEYS_SQL)
+        conn.execute(CREATE_PENDING_GATEWAY_KEYS_SQL)
         _migrate_schema(conn)
 
 
@@ -363,6 +397,57 @@ def client_api_key_is_valid(provided_key: str) -> bool:
     return resolve_app_id_by_api_key(provided_key) is not None
 
 
+def generate_gateway_api_key() -> str:
+    """生成对外网关 API Key（OpenAI 风格前缀 + 随机段）。"""
+    return f"sk-spy-{secrets.token_urlsafe(32)}"
+
+
+_PENDING_GATEWAY_KEY_TTL_SEC = 600
+
+
+def _prune_pending_gateway_keys(conn: sqlite3.Connection, now: float | None = None) -> None:
+    ts = time.time() if now is None else now
+    conn.execute(
+        "DELETE FROM spy_look_pending_gateway_keys WHERE expires_at < ?",
+        (ts,),
+    )
+
+
+def register_pending_gateway_key(key: str) -> None:
+    """登记服务端刚生成的 Key（存 SQLite，多 worker 共享）；供保存时一次性消费。"""
+    text = str(key or "").strip()
+    if not text:
+        return
+    expires_at = time.time() + _PENDING_GATEWAY_KEY_TTL_SEC
+    with sqlite3.connect(DB_PATH) as conn:
+        _prune_pending_gateway_keys(conn)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO spy_look_pending_gateway_keys (api_key, expires_at)
+            VALUES (?, ?)
+            """,
+            (text, expires_at),
+        )
+
+
+def consume_pending_gateway_key(key: str) -> bool:
+    """保存时校验并消费 pending Key；DELETE 原子操作避免多 worker 重复入库。"""
+    text = str(key or "").strip()
+    if not text:
+        return False
+    now = time.time()
+    with sqlite3.connect(DB_PATH) as conn:
+        _prune_pending_gateway_keys(conn, now)
+        cur = conn.execute(
+            """
+            DELETE FROM spy_look_pending_gateway_keys
+            WHERE api_key = ? AND expires_at >= ?
+            """,
+            (text, now),
+        )
+        return cur.rowcount > 0
+
+
 def add_client_key(api_key: str, app_id: str) -> int:
     text = str(api_key or "").strip()
     if not text:
@@ -427,12 +512,15 @@ def _normalize_order_by(value: str) -> str:
 
 
 def mask_api_key(api_key: str) -> str:
+    """脱敏：保留首尾各 4 位，中间固定为 ****（避免长 Key 撑满表格）。"""
     text = str(api_key or "").strip()
     if not text:
         return ""
-    if len(text) <= 10:
-        return "***"
-    return f"{text[:4]}…{text[-4:]}"
+    n = len(text)
+    if n <= 8:
+        return "*" * min(n, 4)
+    keep = 4
+    return f"{text[:keep]}****{text[-keep:]}"
 
 
 def _upstream_row_public(row: sqlite3.Row) -> dict[str, Any]:

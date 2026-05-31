@@ -23,7 +23,7 @@
     <div class="panel">
       <div class="panel-head">
         <h2>对外服务 API Key</h2>
-        <button class="ghost" type="button" onclick="focusNewGatewayKey()">新增密钥</button>
+        <button class="ghost" type="button" onclick="openCreateGatewayKeyModal()">新增密钥</button>
       </div>
       <p class="muted" style="margin-top:0;">
         客户端调用本网关 <code>/v1/models</code>、<code>/v1/chat/completions</code> 时，请求头
@@ -42,13 +42,6 @@
           </thead>
           <tbody id="gwKeyTbody"></tbody>
         </table>
-      </div>
-      <label for="gw_app_id_input" style="margin-top:14px;">app_id（全局唯一，标识下游服务）</label>
-      <input id="gw_app_id_input" type="text" placeholder="例如 billing-service" autocomplete="off" />
-      <label for="gw_client_key_input" style="margin-top:10px;">新增 API Key</label>
-      <input id="gw_client_key_input" type="password" placeholder="粘贴后点击「添加」" autocomplete="off" />
-      <div class="actions" style="margin-top:10px;">
-        <button class="primary" type="button" onclick="addGatewayClientKey()">添加</button>
       </div>
     </div>
 
@@ -137,6 +130,44 @@
       <div class="modal-foot">
         <button class="primary" type="button" onclick="closeTestModal()">关闭</button>
       </div>
+    </div>
+  </div>
+
+  <div id="gwKeyCreateBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-labelledby="gwKeyCreateTitle" onclick="event.stopPropagation()">
+      <h3 id="gwKeyCreateTitle">新增对外 API Key</h3>
+      <p class="modal-hint">保存后写入本地 SQLite，客户端可立即用该 Key 调用本网关；与上游供应商 Key 无关。</p>
+      <form id="gwKeyCreateForm" onsubmit="onCreateGatewayKey(event)">
+        <label for="gw_create_app_id">app_id（全局唯一，标识下游服务）</label>
+        <input
+          id="gw_create_app_id"
+          type="text"
+          placeholder="例如 billing-service"
+          autocomplete="off"
+          spellcheck="false"
+          required
+        />
+        <p class="modal-hint">以字母或数字开头，可含字母、数字、点、下划线、连字符，长度 1–64。</p>
+        <label for="gw_create_key">API Key（服务端自动生成）</label>
+        <div class="key-input-row">
+          <input
+            id="gw_create_key"
+            type="text"
+            placeholder="打开弹窗后自动生成"
+            autocomplete="off"
+            spellcheck="false"
+            readonly
+            required
+          />
+          <button class="ghost" type="button" id="gw_generate_key_btn" onclick="generateGatewayApiKey()">重新生成</button>
+        </div>
+        <p class="modal-hint">密钥仅可由服务端生成，不可手动粘贴或编辑；保存前可点击「重新生成」。</p>
+        <p id="gwKeyCreateError" class="modal-error" hidden></p>
+        <div class="modal-foot">
+          <button class="ghost" type="button" onclick="closeCreateGatewayKeyModal()">取消</button>
+          <button class="primary" type="submit">保存</button>
+        </div>
+      </form>
     </div>
   </div>
 
