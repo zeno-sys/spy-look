@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spy-Look · 上游配置</title>
+    <link rel="stylesheet" href="/css/upstream-config.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="masthead">
+      <div>
+        <p class="kicker">Gateway Admin</p>
+        <h1>上游模型连接配置</h1>
+        <p class="muted">数据存于本地 SQLite（与请求日志同库）。<strong>对外服务</strong>列标记当前转发上游；同一时间仅一条生效，可在操作列切换。</p>
+      </div>
+      <div class="actions">
+        <a class="nav" href="/">← 返回日志</a>
+        <button class="ghost" type="button" onclick="loadList()">刷新列表</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>对外服务 API Key</h2>
+        <button class="ghost" type="button" onclick="focusNewGatewayKey()">新增密钥</button>
+      </div>
+      <p class="muted" style="margin-top:0;">
+        客户端调用本网关 <code>/v1/models</code>、<code>/v1/chat/completions</code> 时，请求头
+        <code>Authorization: Bearer …</code> 与<strong>下列任意一条</strong>密钥匹配即可。存于 SQLite，保存后立即生效；与上游供应商的 Key 无关。
+      </p>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>id</th>
+              <th>脱敏</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="gwKeyTbody"></tbody>
+        </table>
+      </div>
+      <label for="gw_client_key_input" style="margin-top:14px;">新增 API Key</label>
+      <input id="gw_client_key_input" type="password" placeholder="粘贴后点击「添加」" autocomplete="off" />
+      <div class="actions" style="margin-top:10px;">
+        <button class="primary" type="button" onclick="addGatewayClientKey()">添加</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>已配置上游</h2>
+        <button class="ghost" type="button" onclick="openCreateModal()">新增上游</button>
+      </div>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>id</th>
+              <th>名称</th>
+              <th>base_url</th>
+              <th>key</th>
+              <th>超时</th>
+              <th>代理</th>
+              <th>状态</th>
+              <th>对外服务</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div id="toast"></div>
+
+  <div id="createBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-card modal-wide" role="dialog" aria-labelledby="createTitle" onclick="event.stopPropagation()">
+      <h3 id="createTitle">新增上游</h3>
+      <p class="modal-hint">保存后写入本地 SQLite；勾选「设为对外服务上游」后网关会立即以该条目对外转发。</p>
+      <form id="createForm" onsubmit="onCreate(event)">
+        <div class="row2">
+          <div>
+            <label for="c_name">名称</label>
+            <input id="c_name" type="text" placeholder="例如 silicon / openai-compat" required autocomplete="off" />
+          </div>
+          <div>
+            <label for="c_base">Base URL（含 /v1）</label>
+            <input id="c_base" type="text" placeholder="https://api.example.com/v1" required autocomplete="off" />
+          </div>
+        </div>
+        <label for="c_key">API Key</label>
+        <input id="c_key" type="password" autocomplete="off" required />
+        <div class="row2">
+          <div>
+            <label for="c_timeout">超时（秒）</label>
+            <input id="c_timeout" type="number" step="1" min="5" value="60" />
+          </div>
+          <div class="chk" style="align-self: end;">
+            <label style="display:flex;align-items:center;gap:8px;margin:0;font-weight:600;">
+              <input id="c_trust" type="checkbox" /> trust_env（走系统代理）
+            </label>
+          </div>
+        </div>
+        <div class="chk">
+          <label style="display:flex;align-items:center;gap:8px;margin:0;">
+            <input id="c_default" type="checkbox" /> 设为对外服务上游（唯一）
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;margin:0;">
+            <input id="c_enabled" type="checkbox" checked /> 启用
+          </label>
+        </div>
+        <div class="modal-foot">
+          <button class="ghost" type="button" onclick="closeCreateModal()">取消</button>
+          <button class="primary" type="submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="testBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-card modal-wide" role="dialog" aria-labelledby="testModalTitle" onclick="event.stopPropagation()">
+      <h3 id="testModalTitle">可用模型</h3>
+      <div id="testModalSummary" class="test-summary" style="display:none;"></div>
+      <div id="testModalContent">
+        <pre id="testModalPlain" class="test-json"></pre>
+        <div id="testModelListWrap" class="test-model-list-wrap" style="display:none;">
+          <p id="testModelCount" class="test-model-count"></p>
+          <ol id="testModelList" class="test-model-list"></ol>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="primary" type="button" onclick="closeTestModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="editBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-labelledby="editTitle" onclick="event.stopPropagation()">
+      <h3 id="editTitle">编辑上游</h3>
+      <p class="modal-hint" id="editIdHint"></p>
+      <label for="e_name">名称</label>
+      <input id="e_name" type="text" autocomplete="off" />
+      <label for="e_base">Base URL（含 /v1）</label>
+      <input id="e_base" type="text" autocomplete="off" />
+      <label for="e_key">API Key（留空表示不修改）</label>
+      <input id="e_key" type="password" autocomplete="off" />
+      <div class="row2">
+        <div>
+          <label for="e_timeout">超时（秒）</label>
+          <input id="e_timeout" type="number" step="1" min="5" />
+        </div>
+        <div class="chk" style="align-self: end;">
+          <label style="display:flex;align-items:center;gap:8px;margin:0;font-weight:600;">
+            <input id="e_trust" type="checkbox" /> trust_env（走系统代理）
+          </label>
+        </div>
+      </div>
+      <div class="chk">
+        <label style="display:flex;align-items:center;gap:8px;margin:0;">
+          <input id="e_enabled" type="checkbox" /> 启用
+        </label>
+        <span id="e_default_wrap">
+          <label style="display:flex;align-items:center;gap:8px;margin:0;">
+            <input id="e_default" type="checkbox" /> 设为对外服务上游（唯一）
+          </label>
+        </span>
+      </div>
+      <p class="modal-hint" id="e_default_note" style="display:none;">当前已是「对外服务」上游；切换请在列表操作列点击「切为对外」。</p>
+      <div class="modal-foot">
+        <button class="ghost" type="button" onclick="closeEditModal()">取消</button>
+        <button class="primary" type="button" onclick="submitEdit()">保存</button>
+      </div>
+    </div>
+  </div>
+
+    <script src="/js/upstream-config.js"></script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spy-Look 日志查询</title>
+    <link rel="stylesheet" href="/css/index.css" />
+</head>
+<body>
+  <div class="page">
+    <div id="viewSessions" class="view-panel">
+      <div class="masthead">
+        <div>
+          <p class="brand-kicker">Editorial Ops Desk</p>
+          <h2>Spy-Look · 会话列表</h2>
+        </div>
+        <div class="masthead-actions">
+          <span class="brand-note">选择会话后查看该会话下的请求日志</span>
+          <a class="ghost-btn action-btn" href="/upstream-config" style="text-decoration:none;display:inline-block;">上游配置</a>
+          <button class="ghost-btn action-btn" type="button" onclick="openClientInfoModal()">对外调用</button>
+          <button class="ghost-btn action-btn" type="button" onclick="loadSessions()">刷新</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="row" style="grid-template-columns: 1fr auto;">
+          <p class="muted" style="margin:0; font-size:13px; align-self:center;">按最近活动时间排序；点击整行进入该会话的日志页。</p>
+        </div>
+        <div class="pager">
+          <div class="pager-left">
+            <span>每页</span>
+            <select id="sessionPageSize" onchange="onSessionListPageSizeChange()">
+              <option value="20">20</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+            <span>个会话</span>
+          </div>
+          <div class="pager-right">
+            <button class="ghost-btn action-btn" id="sessionPrevPageBtn" type="button" onclick="goSessionListPrevPage()">上一页</button>
+            <span id="sessionPageInfo">第 1 页</span>
+            <button class="ghost-btn action-btn" id="sessionNextPageBtn" type="button" onclick="goSessionListNextPage()">下一页</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table-sessions">
+          <thead>
+            <tr>
+              <th>session_id</th>
+              <th>日志条数</th>
+              <th>首条时间</th>
+              <th>最近时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="sessionTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="viewLogs" class="view-panel hidden">
+      <div class="masthead">
+        <div>
+          <p class="brand-kicker">Editorial Ops Desk</p>
+          <h2>Spy-Look · 会话日志</h2>
+          <div class="logs-context">
+            <span>当前会话</span>
+            <code id="logsSessionHint"></code>
+            <button class="ghost-btn action-btn" type="button" onclick="goBackToSessions()">← 返回会话列表</button>
+          </div>
+        </div>
+        <div class="masthead-actions">
+          <span class="brand-note">Style: 浅色编辑部数据台</span>
+          <a class="ghost-btn action-btn" href="/upstream-config" style="text-decoration:none;display:inline-block;">上游配置</a>
+          <button class="ghost-btn action-btn" type="button" onclick="openClientInfoModal()">对外调用</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="row">
+          <input id="path" placeholder="path 子串筛选（如 /v1/chat 或完整 URL 片段）" value="/v1/chat/completions" />
+          <input id="model" placeholder="model，例如 gpt-4o-mini" />
+          <input id="session_id" placeholder="session_id" title="由会话列表进入，与 URL 同步" />
+          <input id="client_ip" placeholder="client_ip，例如 127.0.0.1" />
+          <input id="start_time" type="datetime-local" placeholder="开始时间" />
+          <input id="end_time" type="datetime-local" placeholder="结束时间" />
+          <button onclick="applyFilters()">查询日志</button>
+        </div>
+        <div class="pager">
+          <div class="pager-left">
+            <span>每页</span>
+            <select id="pageSize" onchange="onPageSizeChange()">
+              <option value="20">20</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+            <span>条</span>
+          </div>
+          <div class="pager-right">
+            <button class="ghost-btn action-btn" id="prevPageBtn" onclick="goPrevPage()">上一页</button>
+            <span id="pageInfo">第 1 页</span>
+            <button class="ghost-btn action-btn" id="nextPageBtn" onclick="goNextPage()">下一页</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>id</th>
+              <th>path</th>
+              <th>model</th>
+              <th class="th-sort" onclick="setSort('status_code')">status <span id="sort-status_code"></span></th>
+              <th class="th-sort" onclick="setSort('latency_ms')">latency (ms) <span id="sort-latency_ms"></span></th>
+              <th>client_ip</th><th>session_id</th><th>tokens(in/out/total)</th><th>request_body</th><th>response_body</th><th>action</th>
+              <th class="th-sort" onclick="setSort('created_at')">created_at <span id="sort-created_at"></span></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div id="modalMask" class="modal-mask" onclick="closeModal(event)">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="modalTitle" class="modal-title"></span>
+        <div class="modal-actions">
+          <button id="streamToggleBtn" class="ghost-btn action-btn hidden" onclick="toggleStreamView()">转为非流式</button>
+          <button class="ghost-btn" onclick="closeModal()">关闭</button>
+        </div>
+      </div>
+      <pre id="modalContent"></pre>
+    </div>
+  </div>
+  <div id="clientInfoMask" class="modal-mask" onclick="closeClientInfoModal(event)">
+    <div class="modal client-info-modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <span class="modal-title">对外调用说明</span>
+        <button type="button" class="ghost-btn" onclick="closeClientInfoModal()">关闭</button>
+      </div>
+      <div id="clientInfoBody" class="client-info-body muted">加载中…</div>
+    </div>
+  </div>
+  <div id="toast"></div>
+    <script src="/js/index.js"></script>
+</body>
+</html>
