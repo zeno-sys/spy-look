@@ -276,7 +276,10 @@ def list_log_apps(
         app_id,
         COUNT(*) AS log_count,
         MIN(created_at) AS first_created_at,
-        MAX(created_at) AS last_created_at
+        MAX(created_at) AS last_created_at,
+        COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
+        COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
+        COALESCE(SUM(total_tokens), 0) AS total_total_tokens
     FROM spy_look_logs
     GROUP BY app_id
     ORDER BY last_created_at DESC
@@ -302,7 +305,10 @@ def list_log_sessions(
         session_id,
         COUNT(*) AS log_count,
         MIN(created_at) AS first_created_at,
-        MAX(created_at) AS last_created_at
+        MAX(created_at) AS last_created_at,
+        COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
+        COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
+        COALESCE(SUM(total_tokens), 0) AS total_total_tokens
     FROM spy_look_logs
     WHERE app_id = ?
     GROUP BY session_id
@@ -541,6 +547,22 @@ def list_upstreams() -> list[dict[str, Any]]:
             "SELECT * FROM spy_look_upstreams ORDER BY is_default DESC, id ASC"
         ).fetchall()
     return [_upstream_row_public(r) for r in rows]
+
+
+def list_failover_upstream_rows() -> list[dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM spy_look_upstreams WHERE enabled = 1 ORDER BY is_default DESC, id ASC"
+        ).fetchall()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        d = dict(row)
+        d["trust_env"] = bool(d.get("trust_env"))
+        d["enabled"] = bool(d.get("enabled"))
+        d["is_default"] = bool(d.get("is_default"))
+        result.append(d)
+    return result
 
 
 def get_upstream(upstream_id: int) -> dict[str, Any] | None:

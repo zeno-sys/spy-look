@@ -50,6 +50,9 @@
         <h2>已配置上游</h2>
         <button class="ghost" type="button" onclick="openCreateModal()">新增上游</button>
       </div>
+      <p class="muted" style="margin-top:0;">
+        连接失败或超时时，将按列表顺序（默认优先）尝试其它已启用上游；已收到有效 HTTP 响应后（含 4xx/5xx）不重试。
+      </p>
       <div style="overflow:auto;">
         <table>
           <thead>

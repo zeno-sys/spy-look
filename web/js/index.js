@@ -16,6 +16,23 @@ let sortBy = "created_at";
     function esc(s) {
       return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
     }
+    function formatTokens(v) {
+      if (v == null) return "—";
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "—";
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+      if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+      return String(n);
+    }
+    function tokVal(v) {
+      if (v == null) return "—";
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "—";
+      return String(n);
+    }
+    function tokBadge(v, cls) {
+      return `<span class="tok ${cls}">${esc(tokVal(v))}</span>`;
+    }
     function escAttr(s) {
       return String(s ?? "")
         .replaceAll("&", "&amp;")
@@ -168,7 +185,7 @@ let sortBy = "created_at";
     }
     async function loadApps() {
       const tbody = document.getElementById("appTbody");
-      tbody.innerHTML = "<tr><td colspan='5'>加载中...</td></tr>";
+      tbody.innerHTML = "<tr><td colspan='8'>加载中...</td></tr>";
       try {
         const params = new URLSearchParams();
         params.set("limit", String(appListPageSize));
@@ -191,6 +208,9 @@ let sortBy = "created_at";
         <tr class="link-row" data-app-id="${escAttr(item.app_id)}" onclick="openSessionsForAppFromRow(this)">
           <td><code>${esc(item.app_id)}</code></td>
           <td>${esc(item.log_count)}</td>
+          <td>${esc(formatTokens(item.total_input_tokens))}</td>
+          <td>${esc(formatTokens(item.total_output_tokens))}</td>
+          <td>${esc(formatTokens(item.total_total_tokens))}</td>
           <td>${esc(item.first_created_at)}</td>
           <td>${esc(item.last_created_at)}</td>
           <td class="table-actions">
@@ -200,11 +220,11 @@ let sortBy = "created_at";
         </tr>`
               )
               .join("")
-          : "<tr><td colspan='5'>暂无应用</td></tr>";
+          : "<tr><td colspan='8'>暂无应用</td></tr>";
       } catch (_) {
         appListLastCount = 0;
         updateAppListPagerUI();
-        tbody.innerHTML = "<tr><td colspan='5'>加载失败</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='8'>加载失败</td></tr>";
       }
     }
     function updateSessionListPagerUI() {
@@ -279,10 +299,10 @@ let sortBy = "created_at";
       const aid = getAppIdFromUrl();
       const tbody = document.getElementById("sessionTbody");
       if (!aid) {
-        tbody.innerHTML = "<tr><td colspan='5'>缺少 app_id</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='8'>缺少 app_id</td></tr>";
         return;
       }
-      tbody.innerHTML = "<tr><td colspan='5'>加载中...</td></tr>";
+      tbody.innerHTML = "<tr><td colspan='8'>加载中...</td></tr>";
       try {
         const params = new URLSearchParams();
         params.set("app_id", aid);
@@ -306,6 +326,9 @@ let sortBy = "created_at";
         <tr class="link-row" data-session-id="${escAttr(item.session_id)}" onclick="openLogsForSessionFromRow(this)">
           <td><code>${esc(item.session_id)}</code></td>
           <td>${esc(item.log_count)}</td>
+          <td>${esc(formatTokens(item.total_input_tokens))}</td>
+          <td>${esc(formatTokens(item.total_output_tokens))}</td>
+          <td>${esc(formatTokens(item.total_total_tokens))}</td>
           <td>${esc(item.first_created_at)}</td>
           <td>${esc(item.last_created_at)}</td>
           <td class="table-actions">
@@ -315,11 +338,11 @@ let sortBy = "created_at";
         </tr>`
               )
               .join("")
-          : "<tr><td colspan='5'>暂无会话</td></tr>";
+          : "<tr><td colspan='8'>暂无会话</td></tr>";
       } catch (_) {
         sessionListLastCount = 0;
         updateSessionListPagerUI();
-        tbody.innerHTML = "<tr><td colspan='5'>加载失败</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='8'>加载失败</td></tr>";
       }
     }
     function buildParams() {
@@ -615,7 +638,7 @@ let sortBy = "created_at";
           <td>${esc(item.client_ip)}</td>
           <td><code>${esc(item.app_id)}</code></td>
           <td>${esc(item.session_id)}</td>
-          <td>${esc(item.input_tokens)}/${esc(item.output_tokens)}/${esc(item.total_tokens)}</td>
+          <td>${tokBadge(item.input_tokens, "tok-in")} ${tokBadge(item.output_tokens, "tok-out")} ${tokBadge(item.total_tokens, "tok-total")}</td>
           <td><button class="ghost-btn action-btn" onclick="showModalFromButton(this)" data-title="request_body" data-payload="${escAttr(toEncodedPayload(item.request_body))}">查看</button></td>
           <td><button class="ghost-btn action-btn" onclick="showModalFromButton(this)" data-title="response_body" data-payload="${escAttr(toEncodedPayload(item.response_body))}">查看</button></td>
           <td><button class="danger-btn" onclick="deleteLog(${esc(item.id)})">删除</button></td>

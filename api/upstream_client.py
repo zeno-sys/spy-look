@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
+
+T = TypeVar("T")
 
 
 @dataclass(slots=True)
@@ -88,3 +90,24 @@ class UpstreamClient:
         )
         response = await self._client.send(request, stream=True)
         return response, response.aiter_bytes()
+
+
+async def try_upstream_rows(
+    rows: list[dict[str, Any]],
+    call: Callable[[UpstreamClient], Awaitable[T]],
+) -> tuple[T, UpstreamClient]:
+    last_error: Exception | None = None
+    for row in rows:
+        cfg = upstream_runtime_from_row(row)
+        if not cfg:
+            continue
+        client = UpstreamClient(cfg)
+        try:
+            result = await call(client)
+            return result, client
+        except (httpx.TimeoutException, httpx.HTTPError) as exc:
+            await client.close()
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise RuntimeError("No enabled upstream available")

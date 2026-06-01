@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import copy
 import time
 from json import JSONDecodeError
 from collections.abc import AsyncIterator
@@ -19,7 +21,13 @@ from .errors import (
     upstream_timeout_error,
     upstream_unavailable_error,
 )
-from .upstream_client import UpstreamClient, UpstreamRuntimeConfig, upstream_runtime_from_row
+from .log_pipeline import schedule_log_event
+from .upstream_client import (
+    UpstreamClient,
+    UpstreamRuntimeConfig,
+    upstream_runtime_from_row,
+    try_upstream_rows,
+)
 from .usage import (
     add_client_key,
     create_upstream,
@@ -36,10 +44,10 @@ from .usage import (
     get_default_upstream_row,
     get_upstream,
     get_upstream_runtime,
+    list_failover_upstream_rows,
     list_log_apps,
     list_log_sessions,
     list_upstreams,
-    log_event,
     mask_api_key,
     query_logs,
     register_pending_gateway_key,
@@ -101,12 +109,22 @@ async def lifespan(app: FastAPI):
     row = get_default_upstream_row()
     cfg = upstream_runtime_from_row(row)
     app.state.upstream_client = UpstreamClient(cfg) if cfg else None
+    app.state._log_tasks: set[asyncio.Task] = set()
     try:
         yield
     finally:
         client = getattr(app.state, "upstream_client", None)
         if client is not None:
             await client.close()
+        tasks = getattr(app.state, "_log_tasks", set())
+        if tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=2.0,
+                )
+            except asyncio.TimeoutError:
+                pass
 
 
 app = FastAPI(title="Spy-Look", version="0.1.0", lifespan=lifespan)
@@ -524,38 +542,20 @@ async def admin_set_default_upstream(request: Request, upstream_id: int) -> JSON
 async def list_models(
     request: Request, app_id: str = Depends(resolve_gateway_client)
 ) -> JSONResponse:
-    client_ip = request.client.host if request.client else None
-    start = time.perf_counter()
-    client: UpstreamClient | None = getattr(request.app.state, "upstream_client", None)
-    if client is None:
+    rows = list_failover_upstream_rows()
+    if not rows:
         return no_upstream_response()
+
     try:
-        upstream_response = await client.list_models()
+        upstream_response, _client = await try_upstream_rows(
+            rows, lambda c: c.list_models()
+        )
     except httpx.TimeoutException:
         return upstream_timeout_error()
     except httpx.HTTPError:
         return upstream_unavailable_error()
 
-    elapsed_ms = int((time.perf_counter() - start) * 1000)
     payload = parse_response_json(upstream_response)
-    gw_path = "/v1/models"
-    log_event(
-        {
-            "path": client.logged_upstream_url(gw_path),
-            "model": None,
-            "status_code": upstream_response.status_code,
-            "latency_ms": elapsed_ms,
-            "client_ip": client_ip,
-            "input_tokens": None,
-            "output_tokens": None,
-            "total_tokens": None,
-            "request_body": None,
-            "response_body": payload,
-            "session_id": DEFAULT_LOG_SESSION_ID,
-            "app_id": app_id,
-        }
-    )
-
     if upstream_response.is_error:
         return normalize_upstream_error(upstream_response.status_code, payload)
     return JSONResponse(status_code=upstream_response.status_code, content=payload)
@@ -566,9 +566,11 @@ async def create_chat_completions(
     request: Request, app_id: str = Depends(resolve_gateway_client)
 ) -> JSONResponse | StreamingResponse:
     client_ip = request.client.host if request.client else None
-    client: UpstreamClient | None = getattr(request.app.state, "upstream_client", None)
-    if client is None:
+
+    rows = list_failover_upstream_rows()
+    if not rows:
         return no_upstream_response()
+
     start = time.perf_counter()
     body = await read_request_json(request)
     if not isinstance(body, dict):
@@ -577,27 +579,47 @@ async def create_chat_completions(
     model = upstream_body.get("model")
     stream = bool(upstream_body.get("stream", False))
 
-    try:
-        if stream:
-            upstream_response, stream_iter = await client.chat_completions_stream(
-                upstream_body
-            )
+    if stream:
+        client: UpstreamClient | None = None
+        upstream_response: httpx.Response | None = None
+        stream_iter: AsyncIterator[bytes] | None = None
+        last_transport_error: Exception | None = None
+
+        for row in rows:
+            cfg = upstream_runtime_from_row(row)
+            if not cfg:
+                continue
+            client = UpstreamClient(cfg)
+            try:
+                upstream_response, stream_iter = await client.chat_completions_stream(
+                    upstream_body
+                )
+            except (httpx.TimeoutException, httpx.HTTPError) as exc:
+                await client.close()
+                last_transport_error = exc
+                continue
+
             if upstream_response.is_error:
                 payload = parse_response_json(upstream_response)
                 return normalize_upstream_error(upstream_response.status_code, payload)
+            break
+        else:
+            if isinstance(last_transport_error, httpx.TimeoutException):
+                return upstream_timeout_error()
+            return upstream_unavailable_error()
 
-            async def wrapped_stream() -> AsyncIterator[bytes]:
-                # 流式响应时，response_body 记录的是完整拼接后的所有 chunk 内容。
-                response_chunks: list[str] = []
-                try:
-                    async for chunk in stream_iter:
-                        response_chunks.append(chunk.decode("utf-8", errors="ignore"))
-                        yield chunk
-                finally:
-                    await upstream_response.aclose()
-                    elapsed_ms = int((time.perf_counter() - start) * 1000)
-                    gw_path = "/v1/chat/completions"
-                    log_event(
+        async def wrapped_stream() -> AsyncIterator[bytes]:
+            response_chunks: list[str] = []
+            try:
+                async for chunk in stream_iter:
+                    response_chunks.append(chunk.decode("utf-8", errors="ignore"))
+                    yield chunk
+            finally:
+                await upstream_response.aclose()
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                gw_path = "/v1/chat/completions"
+                schedule_log_event(
+                    event=copy.deepcopy(
                         {
                             "path": client.logged_upstream_url(gw_path),
                             "model": model,
@@ -612,16 +634,23 @@ async def create_chat_completions(
                             "session_id": session_id,
                             "app_id": app_id,
                         }
-                    )
+                    ),
+                    stream_body="".join(response_chunks),
+                    request_body=copy.deepcopy(upstream_body),
+                    log_tasks=request.app.state._log_tasks,
+                )
 
-            return StreamingResponse(
-                wrapped_stream(),
-                media_type=upstream_response.headers.get(
-                    "content-type", "text/event-stream"
-                ),
-            )
+        return StreamingResponse(
+            wrapped_stream(),
+            media_type=upstream_response.headers.get(
+                "content-type", "text/event-stream"
+            ),
+        )
 
-        upstream_response = await client.chat_completions(upstream_body)
+    try:
+        upstream_response, client = await try_upstream_rows(
+            rows, lambda c: c.chat_completions(upstream_body)
+        )
     except httpx.TimeoutException:
         return upstream_timeout_error()
     except httpx.HTTPError:
@@ -634,21 +663,24 @@ async def create_chat_completions(
     output_tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
     total_tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
     gw_path = "/v1/chat/completions"
-    log_event(
-        {
-            "path": client.logged_upstream_url(gw_path),
-            "model": model,
-            "status_code": upstream_response.status_code,
-            "latency_ms": elapsed_ms,
-            "client_ip": client_ip,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": total_tokens,
-            "request_body": upstream_body,
-            "response_body": payload,
-            "session_id": session_id,
-            "app_id": app_id,
-        }
+    schedule_log_event(
+        event=copy.deepcopy(
+            {
+                "path": client.logged_upstream_url(gw_path),
+                "model": model,
+                "status_code": upstream_response.status_code,
+                "latency_ms": elapsed_ms,
+                "client_ip": client_ip,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+                "request_body": upstream_body,
+                "response_body": payload,
+                "session_id": session_id,
+                "app_id": app_id,
+            }
+        ),
+        log_tasks=request.app.state._log_tasks,
     )
 
     if upstream_response.is_error:
