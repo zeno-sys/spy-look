@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import time
 from json import JSONDecodeError
 from collections.abc import AsyncIterator
@@ -11,6 +12,7 @@ from typing import Any
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from pydantic import ValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -21,7 +23,9 @@ from .errors import (
     upstream_timeout_error,
     upstream_unavailable_error,
 )
+from .capability_probe import probe_model_capabilities
 from .log_pipeline import schedule_log_event
+from .schemas import ModelCapabilityProbeModelsCustomRequest, ModelCapabilityProbeRequest
 from .upstream_client import (
     UpstreamClient,
     UpstreamRuntimeConfig,
@@ -147,6 +151,199 @@ async def index_page() -> FileResponse:
 async def upstream_config_page() -> FileResponse:
     """上游连接配置管理页。"""
     return FileResponse(WEB_DIR / "upstream-config.html")
+
+
+@app.get("/model-capability-probe", include_in_schema=False)
+async def model_capability_probe_page() -> FileResponse:
+    """模型能力探测页。"""
+    return FileResponse(WEB_DIR / "model-capability-probe.html")
+
+
+def _upstream_option_public(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "name": row.get("name") or f"upstream-{row['id']}",
+        "base_url": row.get("base_url"),
+        "is_default": bool(row.get("is_default")),
+    }
+
+
+def _sort_model_ids(model_ids: list[str]) -> list[str]:
+    return sorted(model_ids, key=str.casefold)
+
+
+async def _fetch_models_from_config(cfg: UpstreamRuntimeConfig) -> list[str]:
+    try:
+        async with httpx.AsyncClient(
+            base_url=cfg.base_url,
+            timeout=cfg.timeout_seconds,
+            trust_env=cfg.trust_env,
+        ) as client:
+            resp = await client.get(
+                "/models",
+                headers={
+                    "Authorization": f"Bearer {cfg.api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+        if resp.is_error:
+            return []
+        payload = resp.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            return []
+        ids: list[str] = []
+        for item in data:
+            if isinstance(item, dict) and item.get("id"):
+                ids.append(str(item["id"]))
+        return _sort_model_ids(ids)
+    except (httpx.HTTPError, ValueError, TypeError):
+        return []
+
+
+async def _fetch_upstream_model_ids(row: dict[str, Any]) -> list[str]:
+    cfg = upstream_runtime_from_row(row)
+    if cfg is None:
+        return []
+    return await _fetch_models_from_config(cfg)
+
+
+_MODELS_CACHE_TTL_SECONDS = 300.0
+_upstream_models_cache: dict[int, tuple[float, list[str]]] = {}
+_custom_models_cache: dict[str, tuple[float, list[str]]] = {}
+
+
+def _custom_models_cache_key(uri: str, api_key: str) -> str:
+    raw = f"{uri.strip()}\0{api_key}".encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+async def _get_upstream_models_cached(upstream_id: int) -> tuple[list[str], bool]:
+    """拉取上游 /models 列表；命中缓存时不再请求上游。"""
+    now = time.monotonic()
+    cached = _upstream_models_cache.get(upstream_id)
+    if cached is not None and (now - cached[0]) < _MODELS_CACHE_TTL_SECONDS:
+        return cached[1], True
+
+    row = get_upstream_runtime(upstream_id)
+    if not row:
+        raise HTTPException(status_code=400, detail="upstream not found")
+    if not row.get("enabled"):
+        raise HTTPException(status_code=400, detail="upstream is disabled")
+
+    models = await _fetch_upstream_model_ids(row)
+    _upstream_models_cache[upstream_id] = (now, models)
+    return models, False
+
+
+async def _get_custom_models_cached(uri: str, api_key: str) -> tuple[list[str], bool]:
+    """按自定义 uri / api_key 拉取 /models 列表；命中缓存时不再请求上游。"""
+    cache_key = _custom_models_cache_key(uri, api_key)
+    now = time.monotonic()
+    cached = _custom_models_cache.get(cache_key)
+    if cached is not None and (now - cached[0]) < _MODELS_CACHE_TTL_SECONDS:
+        return cached[1], True
+
+    cfg = UpstreamRuntimeConfig(
+        base_url=uri.strip(),
+        api_key=api_key.strip(),
+        timeout_seconds=60.0,
+        trust_env=False,
+    )
+    models = await _fetch_models_from_config(cfg)
+    _custom_models_cache[cache_key] = (now, models)
+    return models, False
+
+
+@app.get("/admin/model-capability-probe/options")
+async def admin_model_capability_probe_options() -> JSONResponse:
+    """已启用上游列表，供探测页下拉填充。"""
+    rows = list_failover_upstream_rows()
+    upstreams = [_upstream_option_public(row) for row in rows]
+    return JSONResponse(content={"upstreams": upstreams})
+
+
+@app.get("/admin/model-capability-probe/models")
+async def admin_model_capability_probe_models(
+    upstream_id: int = Query(..., ge=1),
+) -> JSONResponse:
+    """按上游 id 拉取 /models 模型列表（服务端缓存 5 分钟）。"""
+    models, from_cache = await _get_upstream_models_cached(upstream_id)
+    return JSONResponse(
+        content={
+            "upstream_id": upstream_id,
+            "models": models,
+            "cached": from_cache,
+        }
+    )
+
+
+@app.post("/admin/model-capability-probe/models/custom")
+async def admin_model_capability_probe_models_custom(
+    request: Request,
+) -> JSONResponse:
+    """按自定义 uri / api_key 拉取 /models 模型列表（服务端缓存 5 分钟）。"""
+    raw = await read_request_json(request)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    try:
+        body = ModelCapabilityProbeModelsCustomRequest.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from None
+
+    uri = body.uri.strip()
+    api_key = body.api_key.strip()
+    models, from_cache = await _get_custom_models_cached(uri, api_key)
+    return JSONResponse(
+        content={
+            "models": models,
+            "cached": from_cache,
+        }
+    )
+
+
+def _resolve_probe_credentials(
+    body: ModelCapabilityProbeRequest,
+) -> tuple[str, str, str]:
+    if body.mode == "upstream":
+        row = get_upstream_runtime(int(body.upstream_id))  # type: ignore[arg-type]
+        if not row:
+            raise HTTPException(status_code=400, detail="upstream not found")
+        if not row.get("enabled"):
+            raise HTTPException(status_code=400, detail="upstream is disabled")
+        uri = str(row.get("base_url") or "").strip()
+        api_key = str(row.get("api_key") or "").strip()
+        if not uri or not api_key:
+            raise HTTPException(status_code=400, detail="incomplete upstream configuration")
+        return uri, api_key, str(body.model).strip()
+    uri = str(body.uri).strip()
+    api_key = str(body.api_key).strip()
+    return uri, api_key, str(body.model).strip()
+
+
+@app.post("/admin/model-capability-probe")
+async def admin_model_capability_probe(request: Request) -> JSONResponse:
+    """探测 OpenAI 兼容模型的 chat / tools / json / thinking 能力。"""
+    raw = await read_request_json(request)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    try:
+        body = ModelCapabilityProbeRequest.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from None
+
+    uri, api_key, model = _resolve_probe_credentials(body)
+    t0 = time.perf_counter()
+    report = await asyncio.to_thread(
+        probe_model_capabilities,
+        uri,
+        api_key,
+        model,
+        timeout=body.timeout,
+        max_tokens=body.max_tokens,
+    )
+    report["total_elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
+    return JSONResponse(content=report)
 
 
 @app.get("/logs")
