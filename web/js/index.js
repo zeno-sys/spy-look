@@ -12,6 +12,11 @@ let sortBy = "created_at";
     let sessionListPage = 1;
     let sessionListPageSize = 50;
     let sessionListLastCount = 0;
+    const LOGS_AUTO_REFRESH_MS = 5000;
+    const LOGS_AUTO_REFRESH_KEY = "spy-look.logsAutoRefresh";
+    let logsAutoRefreshTimer = null;
+    let logsSearchInFlight = false;
+    let logsAutoRefreshEnabled = localStorage.getItem(LOGS_AUTO_REFRESH_KEY) !== "0";
 
     function esc(s) {
       return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
@@ -62,7 +67,56 @@ let sortBy = "created_at";
       const qs = u.searchParams.toString();
       history.pushState({}, "", qs ? `${u.pathname}?${qs}` : u.pathname);
     }
+    function isLogsViewActive() {
+      const logsEl = document.getElementById("viewLogs");
+      return Boolean(logsEl && !logsEl.classList.contains("hidden"));
+    }
+    function isBlockingModalOpen() {
+      const modal = document.getElementById("modalMask");
+      const clientModal = document.getElementById("clientInfoMask");
+      return (
+        (modal && modal.style.display === "flex") ||
+        (clientModal && clientModal.style.display === "flex")
+      );
+    }
+    function canAutoRefreshLogs() {
+      if (!isLogsViewActive()) return false;
+      if (!logsAutoRefreshEnabled) return false;
+      if (document.visibilityState !== "visible") return false;
+      if (currentPage !== 1) return false;
+      if (isBlockingModalOpen()) return false;
+      return true;
+    }
+    function stopLogsAutoRefresh() {
+      if (!logsAutoRefreshTimer) return;
+      clearInterval(logsAutoRefreshTimer);
+      logsAutoRefreshTimer = null;
+    }
+    function startLogsAutoRefresh() {
+      stopLogsAutoRefresh();
+      if (!logsAutoRefreshEnabled || !isLogsViewActive()) return;
+      logsAutoRefreshTimer = setInterval(tickLogsAutoRefresh, LOGS_AUTO_REFRESH_MS);
+    }
+    function tickLogsAutoRefresh() {
+      if (!canAutoRefreshLogs()) return;
+      searchLogs({ silent: true });
+    }
+    function syncLogsAutoRefreshToggleUI() {
+      const el = document.getElementById("logsAutoRefreshToggle");
+      if (el) el.checked = logsAutoRefreshEnabled;
+    }
+    function onLogsAutoRefreshToggle() {
+      const el = document.getElementById("logsAutoRefreshToggle");
+      logsAutoRefreshEnabled = Boolean(el && el.checked);
+      localStorage.setItem(LOGS_AUTO_REFRESH_KEY, logsAutoRefreshEnabled ? "1" : "0");
+      if (logsAutoRefreshEnabled) startLogsAutoRefresh();
+      else stopLogsAutoRefresh();
+    }
+    function refreshLogs() {
+      searchLogs();
+    }
     function applyRoute() {
+      stopLogsAutoRefresh();
       const aid = getAppIdFromUrl();
       const sid = getSessionIdFromUrl();
       const appsEl = document.getElementById("viewApps");
@@ -107,7 +161,9 @@ let sortBy = "created_at";
       document.title = "Spy-Look · 会话日志";
       currentPage = 1;
       updatePagerUI();
+      syncLogsAutoRefreshToggleUI();
       searchLogs();
+      startLogsAutoRefresh();
     }
     function goBackToApps() {
       appListPage = 1;
@@ -620,15 +676,8 @@ let sortBy = "created_at";
       }
       document.getElementById("modalContent").innerHTML = renderModalContent(modalRawText);
     }
-    async function searchLogs() {
-      updateSortIndicators();
-      const tbody = document.getElementById("tbody");
-      tbody.innerHTML = "<tr><td colspan='13'>加载中...</td></tr>";
-      const res = await fetch("/logs?" + buildParams());
-      const data = await res.json();
-      const items = data.items || [];
-      lastItemsCount = items.length;
-      const rows = items.map(item => `
+    function renderLogRows(items) {
+      return items.map(item => `
         <tr>
           <td>${esc(item.id)}</td>
           <td><code class="td-path-url">${esc(item.path)}</code></td>
@@ -645,8 +694,37 @@ let sortBy = "created_at";
           <td>${esc(item.created_at)}</td>
         </tr>
       `).join("");
-      tbody.innerHTML = rows || "<tr><td colspan='13'>暂无数据</td></tr>";
-      updatePagerUI();
+    }
+    async function searchLogs(options = {}) {
+      const silent = options.silent === true;
+      if (silent && logsSearchInFlight) return;
+      logsSearchInFlight = true;
+      updateSortIndicators();
+      const tbody = document.getElementById("tbody");
+      if (!silent) {
+        tbody.innerHTML = "<tr><td colspan='13'>加载中...</td></tr>";
+      }
+      try {
+        const res = await fetch("/logs?" + buildParams());
+        const data = await res.json();
+        if (!res.ok) {
+          if (!silent) {
+            tbody.innerHTML = "<tr><td colspan='13'>加载失败</td></tr>";
+          }
+          return;
+        }
+        const items = data.items || [];
+        lastItemsCount = items.length;
+        const rows = renderLogRows(items);
+        tbody.innerHTML = rows || "<tr><td colspan='13'>暂无数据</td></tr>";
+        updatePagerUI();
+      } catch (_) {
+        if (!silent) {
+          tbody.innerHTML = "<tr><td colspan='13'>加载失败</td></tr>";
+        }
+      } finally {
+        logsSearchInFlight = false;
+      }
     }
     function showModal(title, raw) {
       let text = "";
@@ -1002,5 +1080,14 @@ let sortBy = "created_at";
     });
 
     window.addEventListener("popstate", applyRoute);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && isLogsViewActive()) {
+        if (canAutoRefreshLogs()) searchLogs({ silent: true });
+        startLogsAutoRefresh();
+        return;
+      }
+      stopLogsAutoRefresh();
+    });
     updatePagerUI();
+    syncLogsAutoRefreshToggleUI();
     applyRoute();
