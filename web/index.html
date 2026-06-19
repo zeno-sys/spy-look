@@ -3,11 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Spy-Look 日志查询</title>
-    <link rel="stylesheet" href="/css/index.css" />
+  <title>Spy-Look · 日志查询</title>
+  <meta name="description" content="LLM 网关可观测性面板 — 按应用、会话浏览请求日志与 token 用量" />
+  <meta property="og:title" content="Spy-Look · 日志查询" />
+  <meta property="og:description" content="LLM 网关可观测性面板" />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231f6feb'/><text x='16' y='22' text-anchor='middle' font-size='20'>SL</text></svg>" />
+  <link rel="stylesheet" href="/css/index.css" />
 </head>
 <body>
-  <div class="page">
+  <a href="#main-content" class="skip-link">跳到内容</a>
+  <main id="main-content" class="page">
     <div id="viewApps" class="view-panel">
       <div class="masthead">
         <div>
@@ -16,15 +22,15 @@
         </div>
         <div class="masthead-actions">
           <span class="brand-note">按下游服务（app_id）浏览；点击进入会话与请求日志</span>
-          <a class="ghost-btn action-btn" href="/upstream-config" style="text-decoration:none;display:inline-block;">上游配置</a>
+          <a class="ghost-btn action-btn" href="/upstream-config">上游配置</a>
           <button class="ghost-btn action-btn" type="button" onclick="openClientInfoModal()">对外调用</button>
-          <a class="ghost-btn action-btn" href="/model-capability-probe" style="text-decoration:none;display:inline-block;">模型能力测试</a>
+          <a class="ghost-btn action-btn" href="/model-capability-probe">模型能力测试</a>
           <button class="ghost-btn action-btn" type="button" onclick="loadApps()">刷新</button>
         </div>
       </div>
       <div class="toolbar">
-        <div class="row" style="grid-template-columns: 1fr auto;">
-          <p class="muted" style="margin:0; font-size:13px; align-self:center;">按最近活动时间排序；点击整行进入该应用下的会话列表。</p>
+        <div class="row row-auto">
+          <p class="muted row-hint">按最近活动时间排序；点击整行进入该应用下的会话列表。</p>
         </div>
         <div class="pager">
           <div class="pager-left">
@@ -75,14 +81,14 @@
         </div>
         <div class="masthead-actions">
           <span class="brand-note">选择会话后查看该会话下的请求日志</span>
-          <a class="ghost-btn action-btn" href="/upstream-config" style="text-decoration:none;display:inline-block;">上游配置</a>
+          <a class="ghost-btn action-btn" href="/upstream-config">上游配置</a>
           <button class="ghost-btn action-btn" type="button" onclick="openClientInfoModal()">对外调用</button>
           <button class="ghost-btn action-btn" type="button" onclick="loadSessions()">刷新</button>
         </div>
       </div>
       <div class="toolbar">
-        <div class="row" style="grid-template-columns: 1fr auto;">
-          <p class="muted" style="margin:0; font-size:13px; align-self:center;">按最近活动时间排序；点击整行进入该会话的日志页。</p>
+        <div class="row row-auto">
+          <p class="muted row-hint">按最近活动时间排序；点击整行进入该会话的日志页。</p>
         </div>
         <div class="pager">
           <div class="pager-left">
@@ -135,7 +141,7 @@
         </div>
         <div class="masthead-actions">
           <span class="brand-note">Style: 浅色编辑部数据台</span>
-          <a class="ghost-btn action-btn" href="/upstream-config" style="text-decoration:none;display:inline-block;">上游配置</a>
+          <a class="ghost-btn action-btn" href="/upstream-config">上游配置</a>
           <button class="ghost-btn action-btn" type="button" onclick="openClientInfoModal()">对外调用</button>
           <button class="ghost-btn action-btn" type="button" onclick="refreshLogs()">刷新</button>
         </div>
@@ -189,7 +195,7 @@
         </table>
       </div>
     </div>
-  </div>
+  </main>
   <div id="modalMask" class="modal-mask" onclick="closeModal(event)">
     <div class="modal">
       <div class="modal-header">

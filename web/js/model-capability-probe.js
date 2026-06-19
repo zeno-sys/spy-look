@@ -461,7 +461,7 @@
     try {
       body = buildProbeBody();
     } catch (err) {
-      alert(err.message || String(err));
+      setProbing(false, "配置错误：" + (err.message || String(err)));
       return;
     }
 
@@ -479,8 +479,7 @@
       renderCapabilityReport(data);
       setProbing(false, "探测完成");
     } catch (err) {
-      setProbing(false, "");
-      alert(err.message || String(err));
+      setProbing(false, "请求失败：" + (err.message || String(err)));
     }
   }
 
