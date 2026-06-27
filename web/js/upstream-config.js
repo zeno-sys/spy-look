@@ -563,13 +563,13 @@ function formatApiError(data, fallback) {
       document.getElementById("testModalTitle").textContent = title;
       const sum = document.getElementById("testModalSummary");
       if (summaryLine) {
-        sum.style.display = "block";
+        sum.classList.remove("hidden");
         sum.className = "test-summary " + (summaryClass || "");
         sum.textContent = summaryLine;
       } else {
-        sum.style.display = "none";
+        sum.classList.add("hidden");
         sum.textContent = "";
-        sum.className = "test-summary";
+        sum.className = "test-summary hidden";
       }
       const plain = document.getElementById("testModalPlain");
       const wrap = document.getElementById("testModelListWrap");
@@ -577,8 +577,8 @@ function formatApiError(data, fallback) {
       const countEl = document.getElementById("testModelCount");
       if (mode === "list") {
         const items = payload.items || [];
-        plain.style.display = "none";
-        wrap.style.display = "block";
+        plain.classList.add("hidden");
+        wrap.classList.remove("hidden");
         countEl.textContent = `共 ${items.length} 个模型`;
         list.innerHTML = items
           .map((m) => {
@@ -589,8 +589,8 @@ function formatApiError(data, fallback) {
           })
           .join("");
       } else {
-        plain.style.display = "block";
-        wrap.style.display = "none";
+        plain.classList.remove("hidden");
+        wrap.classList.add("hidden");
         list.innerHTML = "";
         countEl.textContent = "";
         plain.textContent = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
