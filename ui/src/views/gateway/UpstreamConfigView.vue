@@ -1,14 +1,13 @@
 <template>
-  <el-container class="app-container">
-    <el-header class="app-header">
-      <div><h3>Spy-Look · 上游配置</h3></div>
+  <div class="page-container">
+    <div class="page-header">
+      <div><h3>大模型网关 · 上游配置</h3></div>
       <div class="header-actions">
-        <router-link to="/"><el-button>返回日志</el-button></router-link>
         <el-button type="primary" @click="loadAll">刷新列表</el-button>
       </div>
-    </el-header>
+    </div>
 
-    <el-main>
+    <div class="page-body">
       <!-- Client Keys -->
       <el-card class="section-card">
         <template #header>
@@ -22,7 +21,9 @@
           <el-table-column prop="id" label="ID" width="60" />
           <el-table-column prop="app_id" label="App ID" min-width="140" />
           <el-table-column prop="api_key_masked" label="密钥(脱敏)" min-width="200" />
-          <el-table-column prop="created_at" label="创建时间" width="170" />
+          <el-table-column prop="created_at" label="创建时间" width="180">
+            <template #default="{ row }">{{ formatBeijingTime(row.created_at) }}</template>
+          </el-table-column>
           <el-table-column label="操作" width="240">
             <template #default="{ row }">
               <el-button size="small" @click="copyKey(row.id)">复制</el-button>
@@ -70,7 +71,7 @@
           </el-table-column>
         </el-table>
       </el-card>
-    </el-main>
+    </div>
 
     <!-- Create Key Dialog -->
     <el-dialog v-model="showCreateKeyDialog" title="新增对外 API Key" width="500px" destroy-on-close center>
@@ -158,13 +159,14 @@
         </div>
       </div>
     </el-dialog>
-  </el-container>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apiGet, apiPost, apiPatch, apiDelete } from '../composables/useApi'
+import { apiGet, apiPost, apiPatch, apiDelete } from '../../composables/useApi'
+import { formatBeijingTime } from '../../utils/formatTime'
 
 const clientKeys = ref<any[]>([])
 const upstreams = ref<any[]>([])
@@ -193,17 +195,17 @@ const testModels = ref<string[]>([])
 async function loadAll() { await Promise.all([loadClientKeys(), loadUpstreams()]) }
 
 async function loadClientKeys() {
-  try { const d = await apiGet<any>('/admin/gateway-client-keys'); clientKeys.value = d.items || [] }
+  try { const d = await apiGet<any>('/gateway/admin/gateway-client-keys'); clientKeys.value = d.items || [] }
   catch (e: any) { ElMessage.error(e.message) }
 }
 
 async function loadUpstreams() {
-  try { const d = await apiGet<any>('/admin/upstreams'); upstreams.value = d.items || [] }
+  try { const d = await apiGet<any>('/gateway/admin/upstreams'); upstreams.value = d.items || [] }
   catch (e: any) { ElMessage.error(e.message) }
 }
 
 async function generateKey() {
-  try { const d = await apiPost<any>('/admin/gateway-client-keys/generate'); newKeyForm.key = d.gateway_api_key || '' }
+  try { const d = await apiPost<any>('/gateway/admin/gateway-client-keys/generate'); newKeyForm.key = d.gateway_api_key || '' }
   catch (e: any) { ElMessage.error(e.message) }
 }
 
@@ -212,7 +214,7 @@ function openCreateKeyDialog() { newKeyForm.app_id = ''; newKeyForm.key = ''; sh
 async function saveClientKey() {
   keySaving.value = true
   try {
-    await apiPost('/admin/gateway-client-keys', { app_id: newKeyForm.app_id, gateway_api_key: newKeyForm.key })
+    await apiPost('/gateway/admin/gateway-client-keys', { app_id: newKeyForm.app_id, gateway_api_key: newKeyForm.key })
     showCreateKeyDialog.value = false; ElMessage.success('密钥已保存'); await loadClientKeys()
   } catch (e: any) { ElMessage.error(e.message) }
   finally { keySaving.value = false }
@@ -220,7 +222,7 @@ async function saveClientKey() {
 
 async function copyKey(keyId: number) {
   try {
-    const d = await apiGet<any>(`/admin/gateway-client-keys/${keyId}`)
+    const d = await apiGet<any>(`/gateway/admin/gateway-client-keys/${keyId}`)
     await navigator.clipboard.writeText(d.api_key); ElMessage.success('已复制到剪贴板')
   } catch (e: any) { ElMessage.error(e.message) }
 }
@@ -232,14 +234,14 @@ function openEditAppIdDialog(row: any) {
 
 async function saveEditAppId() {
   try {
-    await apiPatch(`/admin/gateway-client-keys/${editingKeyId.value}`, { app_id: editingAppId.value })
+    await apiPatch(`/gateway/admin/gateway-client-keys/${editingKeyId.value}`, { app_id: editingAppId.value })
     showEditAppIdDialog.value = false; ElMessage.success('已更新'); await loadClientKeys()
   } catch (e: any) { ElMessage.error(e.message) }
 }
 
 async function confirmDeleteKey(keyId: number) {
   try { await ElMessageBox.confirm('确认删除此 API Key？', '确认', { type: 'warning' }) } catch { return }
-  try { await apiDelete(`/admin/gateway-client-keys/${keyId}`); await loadClientKeys(); ElMessage.success('已删除') }
+  try { await apiDelete(`/gateway/admin/gateway-client-keys/${keyId}`); await loadClientKeys(); ElMessage.success('已删除') }
   catch (e: any) { ElMessage.error(e.message) }
 }
 
@@ -264,9 +266,9 @@ async function saveUpstream() {
     if (editingUpstreamId.value) {
       const body: any = { name: upstreamForm.name, base_url: upstreamForm.base_url, trust_env: upstreamForm.trust_env, timeout_seconds: upstreamForm.timeout_seconds, enabled: upstreamForm.enabled }
       if (upstreamForm.api_key) body.api_key = upstreamForm.api_key
-      await apiPatch(`/admin/upstreams/${editingUpstreamId.value}`, body)
+      await apiPatch(`/gateway/admin/upstreams/${editingUpstreamId.value}`, body)
     } else {
-      await apiPost('/admin/upstreams', { ...upstreamForm })
+      await apiPost('/gateway/admin/upstreams', { ...upstreamForm })
     }
     showUpstreamDialog.value = false; await loadUpstreams(); ElMessage.success(editingUpstreamId.value ? '已更新' : '已创建')
   } catch (e: any) { ElMessage.error(e.message) }
@@ -275,12 +277,12 @@ async function saveUpstream() {
 
 async function confirmDeleteUpstream(id: number) {
   try { await ElMessageBox.confirm('确认删除此上游？', '确认', { type: 'warning' }) } catch { return }
-  try { await apiDelete(`/admin/upstreams/${id}`); await loadUpstreams(); ElMessage.success('已删除') }
+  try { await apiDelete(`/gateway/admin/upstreams/${id}`); await loadUpstreams(); ElMessage.success('已删除') }
   catch (e: any) { ElMessage.error(e.message) }
 }
 
 async function setDefaultUpstream(id: number) {
-  try { await apiPost(`/admin/upstreams/${id}/set-default`); await loadUpstreams(); ElMessage.success('已设为对外服务') }
+  try { await apiPost(`/gateway/admin/upstreams/${id}/set-default`); await loadUpstreams(); ElMessage.success('已设为对外服务') }
   catch (e: any) { ElMessage.error(e.message) }
 }
 
@@ -288,7 +290,7 @@ async function testUpstream(row: any) {
   showTestDialog.value = true; testResult.value = {}; testModels.value = []
   try {
     const body: any = { base_url: row.base_url, timeout_seconds: row.timeout_seconds, trust_env: row.trust_env, id: row.id }
-    const d = await apiPost<any>('/admin/upstreams/test', body)
+    const d = await apiPost<any>('/gateway/admin/upstreams/test', body)
     testResult.value = d
     if (d.body?.data) testModels.value = d.body.data.map((m: any) => m.id || m).sort()
   } catch (e: any) { testResult.value = { ok: false, error: e.message } }

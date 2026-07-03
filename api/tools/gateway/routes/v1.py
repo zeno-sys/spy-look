@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from db.engine import get_session
-from db.upstreams import get_default_upstream_row, list_failover_upstream_rows
+from db.upstreams import list_failover_upstream_rows
 from dependencies import resolve_gateway_client
 from errors import (
     normalize_upstream_error,
@@ -19,14 +19,14 @@ from errors import (
     upstream_timeout_error,
     upstream_unavailable_error,
 )
-from services.log_pipeline import schedule_log_event
-from services.upstream_client import (
+from tools.gateway.services.log_pipeline import schedule_log_event
+from tools.gateway.services.upstream_client import (
     UpstreamClient,
     upstream_runtime_from_row,
     try_upstream_rows,
 )
 
-router = APIRouter(tags=["gateway"])
+router = APIRouter(prefix="/v1", tags=["gateway"])
 
 DEFAULT_LOG_SESSION_ID = "default"
 
@@ -68,7 +68,7 @@ def parse_response_json(response: httpx.Response) -> Any:
         }
 
 
-@router.get("/v1/models")
+@router.get("/models")
 async def list_models(
     request: Request,
     app_id: str = Depends(resolve_gateway_client),
@@ -91,7 +91,7 @@ async def list_models(
     return JSONResponse(status_code=upstream_response.status_code, content=payload)
 
 
-@router.post("/v1/chat/completions", response_model=None)
+@router.post("/chat/completions", response_model=None)
 async def create_chat_completions(
     request: Request,
     app_id: str = Depends(resolve_gateway_client),

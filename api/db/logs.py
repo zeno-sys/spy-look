@@ -110,6 +110,13 @@ async def query_logs(
     return items, total
 
 
+async def get_log(session: AsyncSession, log_id: int) -> dict[str, Any] | None:
+    log = await session.get(SpyLookLog, log_id)
+    if not log:
+        return None
+    return log.model_dump(mode="json")
+
+
 async def delete_log(session: AsyncSession, log_id: int) -> bool:
     log = await session.get(SpyLookLog, log_id)
     if not log:
@@ -180,6 +187,97 @@ async def list_log_apps(
             "total_total_tokens": row[6],
         })
     return items, total
+
+
+async def get_apps_dashboard_stats(
+    session: AsyncSession,
+    *,
+    top_n: int = 10,
+    timeline_days: int = 14,
+) -> dict[str, Any]:
+    summary_stmt = select(
+        func.count(func.distinct(SpyLookLog.app_id)),
+        func.count(),
+        func.coalesce(func.sum(SpyLookLog.input_tokens), 0),
+        func.coalesce(func.sum(SpyLookLog.output_tokens), 0),
+        func.coalesce(func.sum(SpyLookLog.total_tokens), 0),
+    )
+    summary_row = (await session.execute(summary_stmt)).one()
+
+    by_app_stmt = (
+        select(
+            SpyLookLog.app_id,
+            func.count().label("log_count"),
+            func.coalesce(func.sum(SpyLookLog.input_tokens), 0).label("total_input_tokens"),
+            func.coalesce(func.sum(SpyLookLog.output_tokens), 0).label("total_output_tokens"),
+            func.coalesce(func.sum(SpyLookLog.total_tokens), 0).label("total_total_tokens"),
+        )
+        .group_by(SpyLookLog.app_id)
+        .order_by(func.count().desc())
+        .limit(top_n)
+    )
+    by_app_rows = (await session.execute(by_app_stmt)).all()
+    by_app = [
+        {
+            "app_id": row[0],
+            "log_count": row[1],
+            "total_input_tokens": row[2],
+            "total_output_tokens": row[3],
+            "total_total_tokens": row[4],
+        }
+        for row in by_app_rows
+    ]
+
+    from datetime import datetime, timedelta
+
+    days = max(1, timeline_days)
+    cutoff = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+    timeline_stmt = (
+        select(
+            func.date(SpyLookLog.created_at).label("day"),
+            func.count().label("log_count"),
+            func.coalesce(func.sum(SpyLookLog.input_tokens), 0).label("total_input_tokens"),
+            func.coalesce(func.sum(SpyLookLog.output_tokens), 0).label("total_output_tokens"),
+            func.coalesce(func.sum(SpyLookLog.total_tokens), 0).label("total_total_tokens"),
+        )
+        .where(SpyLookLog.created_at >= cutoff)
+        .group_by(func.date(SpyLookLog.created_at))
+        .order_by(func.date(SpyLookLog.created_at))
+    )
+    timeline_rows = (await session.execute(timeline_stmt)).all()
+    timeline_map = {
+        str(row[0]): {
+            "date": str(row[0]),
+            "log_count": row[1],
+            "total_input_tokens": row[2],
+            "total_output_tokens": row[3],
+            "total_total_tokens": row[4],
+        }
+        for row in timeline_rows
+    }
+
+    timeline: list[dict[str, Any]] = []
+    for i in range(days):
+        day = (cutoff + timedelta(days=i)).date().isoformat()
+        timeline.append(timeline_map.get(day, {
+            "date": day,
+            "log_count": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_total_tokens": 0,
+        }))
+
+    return {
+        "summary": {
+            "app_count": int(summary_row[0] or 0),
+            "log_count": int(summary_row[1] or 0),
+            "total_input_tokens": int(summary_row[2] or 0),
+            "total_output_tokens": int(summary_row[3] or 0),
+            "total_total_tokens": int(summary_row[4] or 0),
+        },
+        "by_app": by_app,
+        "timeline": timeline,
+    }
 
 
 async def list_log_sessions(

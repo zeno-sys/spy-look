@@ -1,7 +1,7 @@
 [project]
 name = "spy-look"
 version = "0.2.0"
-description = "Spy-Look: Comprehensive LLM tools suite with gateway, observability, and model capability probing"
+description = "Spy-Look: 个人工具合集（含 OpenAI 兼容 LLM 网关、可观测与模型能力探测）"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

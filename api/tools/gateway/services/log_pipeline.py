@@ -6,7 +6,7 @@ from typing import Any
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from db.logs import log_event
-from services.utils import stream_tokens_from_sse
+from tools.gateway.services.utils import stream_tokens_from_sse
 
 
 def schedule_log_event(

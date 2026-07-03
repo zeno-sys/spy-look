@@ -1,13 +1,10 @@
 <template>
-  <el-container class="app-container">
-    <el-header class="app-header">
-      <div><h3>Spy-Look · 模型能力测试</h3></div>
-      <div class="header-actions">
-        <router-link to="/"><el-button>返回应用列表</el-button></router-link>
-      </div>
-    </el-header>
+  <div class="page-container">
+    <div class="page-header">
+      <div><h3>大模型网关 · 模型能力测试</h3></div>
+    </div>
 
-    <el-main>
+    <div class="page-body">
       <el-card class="section-card">
         <template #header><span>探测配置</span></template>
         <el-alert type="warning" :closable="false" show-icon style="margin-bottom:12px"
@@ -114,14 +111,14 @@
           <p>{{ report.thinking.detail }}</p>
         </el-card>
       </el-card>
-    </el-main>
-  </el-container>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { apiGet, apiPost } from '../composables/useApi'
+import { apiGet, apiPost } from '../../composables/useApi'
 
 const mode = ref<'upstream' | 'custom'>('upstream')
 const selectedUpstreamId = ref(0)
@@ -159,7 +156,7 @@ const summaryText = computed(() => {
 
 async function loadUpstreamOptions() {
   try {
-    const d = await apiGet<any>('/admin/model-capability-probe/options')
+    const d = await apiGet<any>('/gateway/admin/model-capability-probe/options')
     upstreamOptions.value = d.upstreams || []
     if (upstreamOptions.value.length > 0) {
       selectedUpstreamId.value = upstreamOptions.value[0].id
@@ -172,7 +169,7 @@ async function onUpstreamChange() {
   if (!selectedUpstreamId.value) return
   upstreamModels.value = []; selectedModel.value = ''
   try {
-    const d = await apiGet<any>(`/admin/model-capability-probe/models?upstream_id=${selectedUpstreamId.value}`)
+    const d = await apiGet<any>(`/gateway/admin/model-capability-probe/models?upstream_id=${selectedUpstreamId.value}`)
     upstreamModels.value = d.models || []
   } catch (e: any) { ElMessage.error(e.message) }
 }
@@ -183,7 +180,7 @@ function onCustomCredentialsChange() {
   if (!customUri.value.trim() || !customApiKey.value.trim()) return
   debounceTimer = setTimeout(async () => {
     try {
-      const d = await apiPost<any>('/admin/model-capability-probe/models/custom', {
+      const d = await apiPost<any>('/gateway/admin/model-capability-probe/models/custom', {
         uri: customUri.value.trim(), api_key: customApiKey.value.trim(),
       })
       customModels.value = d.models || []
@@ -197,7 +194,7 @@ async function runProbe() {
     const body: any = mode.value === 'upstream'
       ? { mode: 'upstream', upstream_id: selectedUpstreamId.value, model: selectedModel.value }
       : { mode: 'custom', uri: customUri.value.trim(), api_key: customApiKey.value.trim(), model: selectedModel.value }
-    report.value = await apiPost('/admin/model-capability-probe', body)
+    report.value = await apiPost('/gateway/admin/model-capability-probe', body)
   } catch (e: any) { ElMessage.error(e.message) }
   finally { probing.value = false }
 }

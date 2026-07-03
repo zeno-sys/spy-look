@@ -11,10 +11,8 @@ from config import UI_DIR
 from db.engine import init_db
 from db.upstreams import get_default_upstream_row
 from errors import openai_error_response
-from routes.admin import router as admin_router
-from routes.gateway import router as gateway_router
-from routes.logs import router as logs_router
-from services.upstream_client import UpstreamClient, upstream_runtime_from_row
+from tools.gateway.router import router as gateway_tool_router
+from tools.gateway.services.upstream_client import UpstreamClient, upstream_runtime_from_row
 
 
 @asynccontextmanager
@@ -45,14 +43,12 @@ async def lifespan(app: FastAPI):
                 pass
 
 
-app = FastAPI(title="Spy-Look", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Spy-Look", description="个人工具合集", version="0.2.0", lifespan=lifespan)
 
 if UI_DIR.exists():
     app.mount("/assets", StaticFiles(directory=UI_DIR / "assets"), name="assets")
 
-app.include_router(gateway_router)
-app.include_router(logs_router)
-app.include_router(admin_router)
+app.include_router(gateway_tool_router)
 
 
 @app.get("/healthz")

@@ -1,32 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic import BaseModel, Field, model_validator
-
-
-class OpenAIErrorBody(BaseModel):
-    message: str
-    type: str = "gateway_error"
-    param: str | None = None
-    code: str | None = None
-
-
-class OpenAIErrorResponse(BaseModel):
-    error: OpenAIErrorBody
-
-
-class ModelCard(BaseModel):
-    id: str
-    object: str = "model"
-    created: int | None = None
-    owned_by: str | None = None
-    extra: dict[str, Any] = Field(default_factory=dict)
-
-
-class ModelListResponse(BaseModel):
-    object: str = "list"
-    data: list[dict[str, Any]]
+from pydantic import BaseModel, model_validator
 
 
 class ModelCapabilityProbeRequest(BaseModel):
@@ -69,4 +43,17 @@ class ModelCapabilityProbeModelsCustomRequest(BaseModel):
             raise ValueError("uri is required")
         if not (self.api_key or "").strip():
             raise ValueError("api_key is required")
+        return self
+
+
+class LogReplayRequest(BaseModel):
+    upstream_id: int
+    model: str
+
+    @model_validator(mode="after")
+    def validate_non_empty(self) -> LogReplayRequest:
+        if self.upstream_id < 1:
+            raise ValueError("upstream_id is required")
+        if not (self.model or "").strip():
+            raise ValueError("model is required")
         return self

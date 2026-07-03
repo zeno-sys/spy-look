@@ -36,15 +36,15 @@ from db.upstreams import (
     set_default_upstream,
     update_upstream,
 )
-from schemas import ModelCapabilityProbeModelsCustomRequest, ModelCapabilityProbeRequest
-from services.capability_probe import probe_model_capabilities
-from services.upstream_client import (
+from tools.gateway.schemas import ModelCapabilityProbeModelsCustomRequest, ModelCapabilityProbeRequest
+from tools.gateway.services.capability_probe import probe_model_capabilities
+from tools.gateway.services.upstream_client import (
     UpstreamClient,
     UpstreamRuntimeConfig,
     upstream_runtime_from_row,
 )
 
-router = APIRouter(tags=["admin"])
+router = APIRouter(prefix="/gateway/admin", tags=["gateway-admin"])
 
 
 async def read_request_json(request: Request) -> Any:
@@ -175,7 +175,7 @@ async def _runtime_config_from_test_body(session: AsyncSession, body: dict[str, 
     )
 
 
-@router.get("/admin/client-info")
+@router.get("/client-info")
 async def admin_client_info(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -198,14 +198,12 @@ async def admin_client_info(
     })
 
 
-# --- Client Keys ---
-
-@router.get("/admin/gateway-client-keys")
+@router.get("/gateway-client-keys")
 async def admin_list_gateway_client_keys(session: AsyncSession = Depends(get_session)) -> JSONResponse:
     return JSONResponse(content=await get_client_api_key_meta(session))
 
 
-@router.get("/admin/gateway-client-keys/{key_id}")
+@router.get("/gateway-client-keys/{key_id}")
 async def admin_get_client_key_plain(key_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     plain = await get_client_key_plain(session, key_id)
     if plain is None:
@@ -213,14 +211,14 @@ async def admin_get_client_key_plain(key_id: int, session: AsyncSession = Depend
     return JSONResponse(content={"id": key_id, "api_key": plain})
 
 
-@router.post("/admin/gateway-client-keys/generate")
+@router.post("/gateway-client-keys/generate")
 async def admin_generate_gateway_client_key(session: AsyncSession = Depends(get_session)) -> JSONResponse:
     key = generate_gateway_api_key()
     await register_pending_gateway_key(session, key)
     return JSONResponse(content={"gateway_api_key": key})
 
 
-@router.post("/admin/gateway-client-keys")
+@router.post("/gateway-client-keys")
 async def admin_add_client_key(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     raw = await read_request_json(request)
     if not isinstance(raw, dict):
@@ -247,7 +245,7 @@ async def admin_add_client_key(request: Request, session: AsyncSession = Depends
     })
 
 
-@router.patch("/admin/gateway-client-keys/{key_id}")
+@router.patch("/gateway-client-keys/{key_id}")
 async def admin_patch_client_key(key_id: int, request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     raw = await read_request_json(request)
     if not isinstance(raw, dict):
@@ -264,7 +262,7 @@ async def admin_patch_client_key(key_id: int, request: Request, session: AsyncSe
     return JSONResponse(content=meta)
 
 
-@router.delete("/admin/gateway-client-keys/{key_id}")
+@router.delete("/gateway-client-keys/{key_id}")
 async def admin_delete_client_key(key_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     try:
         await delete_client_key(session, key_id)
@@ -276,14 +274,12 @@ async def admin_delete_client_key(key_id: int, session: AsyncSession = Depends(g
     return JSONResponse(content=meta)
 
 
-# --- Upstreams ---
-
-@router.get("/admin/upstreams")
+@router.get("/upstreams")
 async def admin_list_upstreams(session: AsyncSession = Depends(get_session)) -> JSONResponse:
     return JSONResponse(content={"items": await list_upstreams(session)})
 
 
-@router.get("/admin/upstreams/{upstream_id}")
+@router.get("/upstreams/{upstream_id}")
 async def admin_get_upstream(upstream_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     row = await get_upstream(session, upstream_id)
     if not row:
@@ -291,7 +287,7 @@ async def admin_get_upstream(upstream_id: int, session: AsyncSession = Depends(g
     return JSONResponse(content=row)
 
 
-@router.post("/admin/upstreams")
+@router.post("/upstreams")
 async def admin_create_upstream(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     body = await read_request_json(request)
     if not isinstance(body, dict):
@@ -316,7 +312,7 @@ async def admin_create_upstream(request: Request, session: AsyncSession = Depend
     return JSONResponse(status_code=201, content=row)
 
 
-@router.patch("/admin/upstreams/{upstream_id}")
+@router.patch("/upstreams/{upstream_id}")
 async def admin_patch_upstream(request: Request, upstream_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     body = await read_request_json(request)
     if not isinstance(body, dict):
@@ -337,7 +333,7 @@ async def admin_patch_upstream(request: Request, upstream_id: int, session: Asyn
     return JSONResponse(content=row)
 
 
-@router.delete("/admin/upstreams/{upstream_id}")
+@router.delete("/upstreams/{upstream_id}")
 async def admin_delete_upstream(request: Request, upstream_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     ok = await delete_upstream(session, upstream_id)
     if not ok:
@@ -346,7 +342,7 @@ async def admin_delete_upstream(request: Request, upstream_id: int, session: Asy
     return JSONResponse(content={"ok": True, "deleted_id": upstream_id})
 
 
-@router.post("/admin/upstreams/{upstream_id}/set-default")
+@router.post("/upstreams/{upstream_id}/set-default")
 async def admin_set_default_upstream(request: Request, upstream_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     ok = await set_default_upstream(session, upstream_id)
     if not ok:
@@ -356,7 +352,7 @@ async def admin_set_default_upstream(request: Request, upstream_id: int, session
     return JSONResponse(content=row)
 
 
-@router.post("/admin/upstreams/test")
+@router.post("/upstreams/test")
 async def admin_test_upstream(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     raw = await read_request_json(request)
     body = raw if isinstance(raw, dict) else {}
@@ -401,16 +397,14 @@ async def admin_test_upstream(request: Request, session: AsyncSession = Depends(
     })
 
 
-# --- Capability Probe ---
-
-@router.get("/admin/model-capability-probe/options")
+@router.get("/model-capability-probe/options")
 async def admin_model_capability_probe_options(session: AsyncSession = Depends(get_session)) -> JSONResponse:
     rows = await list_failover_upstream_rows(session)
     upstreams = [_upstream_option_public(row) for row in rows]
     return JSONResponse(content={"upstreams": upstreams})
 
 
-@router.get("/admin/model-capability-probe/models")
+@router.get("/model-capability-probe/models")
 async def admin_model_capability_probe_models(
     upstream_id: int = Query(..., ge=1),
     session: AsyncSession = Depends(get_session),
@@ -419,7 +413,7 @@ async def admin_model_capability_probe_models(
     return JSONResponse(content={"upstream_id": upstream_id, "models": models, "cached": from_cache})
 
 
-@router.post("/admin/model-capability-probe/models/custom")
+@router.post("/model-capability-probe/models/custom")
 async def admin_model_capability_probe_models_custom(request: Request) -> JSONResponse:
     raw = await read_request_json(request)
     if not isinstance(raw, dict):
@@ -452,7 +446,7 @@ async def _resolve_probe_credentials(
     return uri, api_key, str(body.model).strip()
 
 
-@router.post("/admin/model-capability-probe")
+@router.post("/model-capability-probe")
 async def admin_model_capability_probe(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     raw = await read_request_json(request)
     if not isinstance(raw, dict):
