@@ -47,3 +47,7 @@ Desktop.ini
 
 # Temp
 tempCodeRunnerFile.py
+
+# Frontend
+ui/node_modules/
+ui/dist/

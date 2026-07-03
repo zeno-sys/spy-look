@@ -1,0 +1,14 @@
+[project]
+name = "spy-look"
+version = "0.2.0"
+description = "Spy-Look: Comprehensive LLM tools suite with gateway, observability, and model capability probing"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.136.3",
+    "httpx>=0.28.1",
+    "uvicorn>=0.48.0",
+    "sqlmodel>=0.0.22",
+    "aiofiles>=24.0.0",
+    "aiosqlite>=0.20.0",
+]

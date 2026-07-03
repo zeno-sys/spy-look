@@ -27,7 +27,6 @@ def openai_error_response(
 
 
 def upstream_timeout_error() -> JSONResponse:
-    """返回上游请求超时错误响应。"""
     return openai_error_response(
         message="Upstream request timeout",
         status_code=504,
@@ -37,7 +36,6 @@ def upstream_timeout_error() -> JSONResponse:
 
 
 def upstream_unavailable_error() -> JSONResponse:
-    """返回上游服务不可用错误响应。"""
     return openai_error_response(
         message="Failed to connect upstream",
         status_code=502,
@@ -47,10 +45,8 @@ def upstream_unavailable_error() -> JSONResponse:
 
 
 def normalize_upstream_error(status_code: int, payload: Any) -> JSONResponse:
-    """将上游错误规范化为 OpenAI 风格响应。"""
     if isinstance(payload, dict) and "error" in payload:
         return JSONResponse(status_code=status_code, content=payload)
-
     return openai_error_response(
         message="Upstream request failed",
         status_code=status_code,
