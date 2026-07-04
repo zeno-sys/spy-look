@@ -49,3 +49,53 @@ export async function apiDelete<T = any>(path: string): Promise<T> {
   }
   return res.json()
 }
+
+export type SseHandler = (event: string, data: Record<string, unknown>) => void
+
+export async function apiStreamPost(
+  path: string,
+  body: FormData | object,
+  onEvent: SseHandler,
+): Promise<void> {
+  const isFormData = body instanceof FormData
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
+    body: isFormData ? body : JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
+  }
+  if (!res.body) {
+    throw new Error('响应不支持流式读取')
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() ?? ''
+    for (const block of blocks) {
+      if (!block.trim()) continue
+      let event = 'message'
+      let dataStr = ''
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('data:')) dataStr = line.slice(5).trim()
+      }
+      if (dataStr) {
+        try {
+          onEvent(event, JSON.parse(dataStr))
+        } catch {
+          onEvent(event, { raw: dataStr })
+        }
+      }
+    }
+  }
+}

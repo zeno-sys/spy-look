@@ -37,4 +37,20 @@ export const tools: ToolDefinition[] = [
       { path: '/gateway/model-capability-probe', title: '能力测试' },
     ],
   },
+  {
+    id: 'video-tools',
+    title: '视频工具',
+    description: '视频处理工具集：语音转文字等。',
+    icon: 'VideoCamera',
+    accent: {
+      gradient: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+      surface: 'linear-gradient(160deg, #f5f7ff 0%, #eef2ff 100%)',
+      iconColor: '#4338ca',
+    },
+    homePath: '/video-tools/config',
+    menuItems: [
+      { path: '/video-tools/config', title: '工具配置' },
+      { path: '/video-tools/voice-to-text', title: '语音转文字' },
+    ],
+  },
 ]

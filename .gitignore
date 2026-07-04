@@ -20,9 +20,11 @@ env/
 .env.*
 !.env.example
 
-# Spy-Look runtime (local SQLite)
+# Spy-Look runtime (local SQLite & tool configs)
 spy_look.db
 spy_look.db-*
+api/video_tools_config.json
+video_tools_config.json
 
 # Logs
 *.log

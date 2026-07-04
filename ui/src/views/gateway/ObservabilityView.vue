@@ -269,9 +269,79 @@
     </el-dialog>
 
     <!-- Client Info Dialog -->
-    <el-dialog v-model="showClientInfo" :title="clientInfoTitle" width="600px" destroy-on-close center>
-      <div v-if="clientInfoLoading" style="text-align:center;padding:20px"><el-icon class="is-loading"><Loading /></el-icon> 加载中...</div>
-      <div v-else class="client-info" v-html="clientInfoHtml"></div>
+    <el-dialog
+      v-model="showClientInfo"
+      :title="clientInfoTitle"
+      width="680px"
+      destroy-on-close
+      center
+      class="client-info-dialog"
+    >
+      <div v-if="clientInfoLoading" class="client-info-loading">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>加载中...</span>
+      </div>
+      <div v-else-if="clientInfoError" class="client-info-error">加载失败，请稍后重试</div>
+      <div v-else-if="clientInfoData" class="client-info">
+        <section class="client-info-section">
+          <h4 class="client-info-heading">连接信息</h4>
+          <dl class="client-info-meta">
+            <div class="client-info-meta-row">
+              <dt>应用 ID</dt>
+              <dd><code>{{ clientInfoData.app_id }}</code></dd>
+            </div>
+            <div class="client-info-meta-row">
+              <dt>网关地址</dt>
+              <dd><code>{{ clientInfoData.gateway_base_url }}</code></dd>
+            </div>
+            <div class="client-info-meta-row">
+              <dt>API Key</dt>
+              <dd><code class="client-info-key">{{ clientInfoData.gateway_api_key }}</code></dd>
+            </div>
+            <div class="client-info-meta-row">
+              <dt>Models</dt>
+              <dd><code>{{ clientInfoData.v1_models_url }}</code></dd>
+            </div>
+            <div class="client-info-meta-row">
+              <dt>Chat</dt>
+              <dd><code>{{ clientInfoData.v1_chat_completions_url }}</code></dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="client-info-section">
+          <h4 class="client-info-heading">session_id</h4>
+          <div class="client-info-callout">
+            <p>
+              在 <code>POST /v1/chat/completions</code> 请求体中可选携带
+              <code>session_id</code>，用于观测页按「应用 → 会话 → 日志」分组追踪。
+            </p>
+            <ul>
+              <li>不传时默认为 <code>default</code></li>
+              <li>仅用于网关落库，转发上游前会自动移除</li>
+              <li>建议按业务语义命名，如 <code>user-42-chat-1</code>、<code>thread-9</code></li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="client-info-section">
+          <h4 class="client-info-heading">curl 示例</h4>
+          <div class="client-info-example">
+            <div class="client-info-example-head">
+              <span class="client-info-example-label">列表模型</span>
+              <el-button size="small" text @click="copyClientInfoCurl(clientInfoCurlModels)">复制</el-button>
+            </div>
+            <pre>{{ clientInfoCurlModels }}</pre>
+          </div>
+          <div class="client-info-example">
+            <div class="client-info-example-head">
+              <span class="client-info-example-label">对话（含 session_id）</span>
+              <el-button size="small" text @click="copyClientInfoCurl(clientInfoCurlChat)">复制</el-button>
+            </div>
+            <pre>{{ clientInfoCurlChat }}</pre>
+          </div>
+        </section>
+      </div>
     </el-dialog>
 
     <!-- Replay Dialog -->
@@ -353,10 +423,31 @@ const modalStreamToggle = ref(false)
 const modalStreamMode = ref(true)
 let modalRawBody = ''
 
+interface ClientInfoData {
+  app_id: string
+  gateway_base_url: string
+  gateway_api_key: string
+  v1_models_url: string
+  v1_chat_completions_url: string
+}
+
 const showClientInfo = ref(false)
 const clientInfoLoading = ref(false)
-const clientInfoHtml = ref('')
+const clientInfoError = ref(false)
+const clientInfoData = ref<ClientInfoData | null>(null)
 const clientInfoTitle = ref('对外调用说明')
+
+const clientInfoCurlModels = computed(() => {
+  const d = clientInfoData.value
+  if (!d) return ''
+  return `curl ${d.v1_models_url} -H "Authorization: Bearer ${d.gateway_api_key}"`
+})
+
+const clientInfoCurlChat = computed(() => {
+  const d = clientInfoData.value
+  if (!d) return ''
+  return `curl ${d.v1_chat_completions_url} -H "Content-Type: application/json" -H "Authorization: Bearer ${d.gateway_api_key}" -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello!"}],"session_id":"user-42-chat-1"}'`
+})
 
 const showAppPicker = ref(false)
 const appPickerOptions = ref<string[]>([])
@@ -736,6 +827,16 @@ async function copyModalContent() {
   }
 }
 
+async function copyClientInfoCurl(text: string) {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
 function confirmAppPicker() {
   showAppPicker.value = false
   appPickerResolve?.(appPickerSelected.value)
@@ -771,24 +872,23 @@ function pickApp(): Promise<string | null> {
 async function loadClientInfo(appId: string) {
   showClientInfo.value = true
   clientInfoLoading.value = true
-  clientInfoHtml.value = ''
+  clientInfoData.value = null
+  clientInfoError.value = false
   clientInfoTitle.value = `对外调用说明 · ${appId}`
   try {
     const data = await apiGet<any>('/gateway/admin/client-info', { app_id: appId })
-    const key = data.gateway_api_key || '(暂无密钥)'
-    clientInfoHtml.value = `
-      <p><b>应用 ID</b>: <code>${data.app_id || appId}</code></p>
-      <p><b>网关地址</b>: ${data.gateway_base_url}</p>
-      <p><b>API Key</b>: <code>${key}</code></p>
-      <p><b>Models</b>: <code>${data.v1_models_url}</code></p>
-      <p><b>Chat</b>: <code>${data.v1_chat_completions_url}</code></p>
-      <el-divider />
-      <p><b>curl 示例 - 列表模型:</b></p>
-      <pre>curl ${data.v1_models_url} -H "Authorization: Bearer ${key}"</pre>
-      <p><b>curl 示例 - 对话:</b></p>
-      <pre>curl ${data.v1_chat_completions_url} -H "Content-Type: application/json" -H "Authorization: Bearer ${key}" -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello!"}]}'</pre>`
-  } catch { clientInfoHtml.value = '<p style="color:red">加载失败</p>' }
-  finally { clientInfoLoading.value = false }
+    clientInfoData.value = {
+      app_id: data.app_id || appId,
+      gateway_base_url: data.gateway_base_url,
+      gateway_api_key: data.gateway_api_key || '(暂无密钥)',
+      v1_models_url: data.v1_models_url,
+      v1_chat_completions_url: data.v1_chat_completions_url,
+    }
+  } catch {
+    clientInfoError.value = true
+  } finally {
+    clientInfoLoading.value = false
+  }
 }
 
 async function openClientInfoModal() {
@@ -1105,5 +1205,168 @@ onUnmounted(() => {
   .gw-dash-bar-row {
     grid-template-columns: 72px 1fr 52px;
   }
+}
+
+.client-info-dialog :deep(.el-dialog__body) {
+  padding-top: 8px;
+  padding-bottom: 24px;
+}
+
+.client-info-loading,
+.client-info-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--sl-text-muted);
+}
+
+.client-info-error {
+  color: #dc2626;
+}
+
+.client-info {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.client-info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.client-info-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sl-text);
+  letter-spacing: 0.02em;
+}
+
+.client-info-meta {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: var(--sl-radius-md);
+  border: 1px solid var(--sl-border);
+  background: var(--sl-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.client-info-meta-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.client-info-meta-row dt {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sl-text-muted);
+  line-height: 1.6;
+}
+
+.client-info-meta-row dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--sl-text);
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.client-info-meta-row code {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--sl-accent-subtle);
+  border: 1px solid var(--sl-border);
+}
+
+.client-info-key {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.client-info-callout {
+  padding: 14px 16px 14px 18px;
+  border-radius: var(--sl-radius-md);
+  border: 1px solid var(--sl-accent-border);
+  border-left: 3px solid var(--sl-accent);
+  background: var(--sl-accent-subtle);
+}
+
+.client-info-callout p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--sl-text-secondary);
+}
+
+.client-info-callout p:last-child {
+  margin-bottom: 0;
+}
+
+.client-info-callout ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--sl-text-secondary);
+}
+
+.client-info-callout li + li {
+  margin-top: 4px;
+}
+
+.client-info-callout code {
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--sl-border);
+}
+
+.client-info-example {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.client-info-example + .client-info-example {
+  margin-top: 4px;
+}
+
+.client-info-example-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.client-info-example-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sl-text-muted);
+}
+
+.client-info-example pre {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--sl-radius-sm);
+  border: 1px solid var(--sl-border);
+  background: #f0eeea;
+  color: var(--sl-text-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", monospace;
 }
 </style>

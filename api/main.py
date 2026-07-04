@@ -12,12 +12,17 @@ from db.engine import init_db
 from db.upstreams import get_default_upstream_row
 from errors import openai_error_response
 from tools.gateway.router import router as gateway_tool_router
+from tools.video_tools.router import router as video_tools_router
 from tools.gateway.services.upstream_client import UpstreamClient, upstream_runtime_from_row
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+
+    from tools.video_tools.services.config_loader import ensure_config
+
+    ensure_config()
 
     from db.engine import async_session_factory, async_engine
     async with async_session_factory(async_engine) as session:
@@ -49,6 +54,7 @@ if UI_DIR.exists():
     app.mount("/assets", StaticFiles(directory=UI_DIR / "assets"), name="assets")
 
 app.include_router(gateway_tool_router)
+app.include_router(video_tools_router)
 
 
 @app.get("/healthz")
@@ -81,17 +87,10 @@ async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse
 
 
 if __name__ == "__main__":
-    import logging
-    import os
-
     import uvicorn
-
-    host = (os.environ.get("SPY_LOOK_HOST") or "127.0.0.1").strip() or "127.0.0.1"
-    port = int(os.environ.get("SPY_LOOK_PORT") or "8000")
-    reload = (os.environ.get("SPY_LOOK_RELOAD") or "").strip().lower() in ("1", "true", "yes", "on")
-
-    display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    logger = logging.getLogger("spy_look")
-    logger.info(f"Spy-Look is running on http://{display_host}:{port}")
+    host = "0.0.0.0"
+    port = 8000
+    reload = True
     uvicorn.run("main:app", host=host, port=port, reload=reload)
+
+

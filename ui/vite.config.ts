@@ -9,6 +9,7 @@ export default defineConfig({
       '/v1': 'http://127.0.0.1:8000',
       '/gateway/admin': 'http://127.0.0.1:8000',
       '/gateway/logs': 'http://127.0.0.1:8000',
+      '/video-tools/admin': 'http://127.0.0.1:8000',
       '/healthz': 'http://127.0.0.1:8000',
     },
   },
