@@ -13,4 +13,5 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "moviepy>=2.0.0",
     "python-multipart>=0.0.9",
+    "yt-dlp>=2025.1.0",
 ]

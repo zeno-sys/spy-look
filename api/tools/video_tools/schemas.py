@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -24,17 +24,25 @@ class AsrConfig(BaseModel):
     request_timeout_sec: int = 300
 
 
+class YtdlpConfig(BaseModel):
+    cookies_file: str = ""
+    cookies_from_browser: str = ""
+
+
 class VideoToolsConfig(BaseModel):
     ffmpeg_path: str = ""
     vad: VadConfig = Field(default_factory=VadConfig)
     asr: AsrConfig = Field(default_factory=AsrConfig)
+    ytdlp: YtdlpConfig = Field(default_factory=YtdlpConfig)
 
 
 class VideoToolsConfigPatch(BaseModel):
     ffmpeg_path: str | None = None
     vad: VadConfig | None = None
     asr: AsrConfig | None = None
+    ytdlp: YtdlpConfig | None = None
 
 
 class VoiceToTextUrlRequest(BaseModel):
     url: str
+    url_type: Literal["direct", "page"] = "direct"

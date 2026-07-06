@@ -22,6 +22,7 @@ if str(_SERVICES_DIR) not in sys.path:
     sys.path.insert(0, str(_SERVICES_DIR))
 
 from config_loader import load_config, reload_config, save_config  # noqa: E402
+import video_resolver  # noqa: E402
 import voice_to_text  # noqa: E402
 
 router = APIRouter(prefix="/video-tools/admin", tags=["video-tools-admin"])
@@ -96,6 +97,7 @@ async def patch_config(body: VideoToolsConfigPatch) -> dict[str, Any]:
     save_config(merged)
     reload_config()
     voice_to_text.refresh_config()
+    video_resolver.refresh_config()
     return _mask_config(merged)
 
 
@@ -182,20 +184,22 @@ def _sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def _parse_request_input(request: Request) -> tuple[UploadFile | None, str | None]:
+async def _parse_request_input(
+    request: Request,
+) -> tuple[UploadFile | None, str | None, str]:
     content_type = (request.headers.get("content-type") or "").lower()
     if "multipart/form-data" in content_type:
         form = await request.form()
         upload = form.get("file")
         if upload is None or not isinstance(upload, UploadFile):
             raise HTTPException(status_code=400, detail="请上传 file 字段（.mp4）")
-        return upload, None
+        return upload, None, "direct"
     if "application/json" in content_type:
         body = VoiceToTextUrlRequest.model_validate(await request.json())
         url = body.url.strip()
         if not url:
             raise HTTPException(status_code=400, detail="url 不能为空")
-        return None, url
+        return None, url, body.url_type
     raise HTTPException(
         status_code=400,
         detail="请使用 multipart/form-data 上传文件或 application/json 提交 url",
@@ -204,7 +208,7 @@ async def _parse_request_input(request: Request) -> tuple[UploadFile | None, str
 
 @router.post("/voice-to-text")
 async def voice_to_text_stream(request: Request) -> StreamingResponse:
-    upload, video_url = await _parse_request_input(request)
+    upload, video_url, url_type = await _parse_request_input(request)
 
     async def event_stream() -> AsyncIterator[str]:
         queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
@@ -222,6 +226,16 @@ async def voice_to_text_stream(request: Request) -> StreamingResponse:
             try:
                 if upload is not None:
                     await _save_upload_file(upload, mp4_path, on_progress)
+                elif url_type == "page":
+                    reload_config()
+                    video_resolver.refresh_config()
+                    await asyncio.to_thread(
+                        video_resolver.download_page_video,
+                        video_url or "",
+                        mp4_path,
+                        MAX_DOWNLOAD_BYTES,
+                        progress=on_progress,
+                    )
                 else:
                     await _download_video_url(
                         video_url or "",

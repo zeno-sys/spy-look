@@ -35,12 +35,13 @@ export const tools: ToolDefinition[] = [
       { path: '/gateway/observability', title: '请求日志' },
       { path: '/gateway/upstream-config', title: '上游配置' },
       { path: '/gateway/model-capability-probe', title: '能力测试' },
+      { path: '/gateway/vram-calculator', title: '显存计算' },
     ],
   },
   {
     id: 'video-tools',
     title: '视频工具',
-    description: '视频处理工具集：语音转文字等。',
+    description: '视频处理工具集：视频转文字等。',
     icon: 'VideoCamera',
     accent: {
       gradient: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
@@ -50,7 +51,7 @@ export const tools: ToolDefinition[] = [
     homePath: '/video-tools/config',
     menuItems: [
       { path: '/video-tools/config', title: '工具配置' },
-      { path: '/video-tools/voice-to-text', title: '语音转文字' },
+      { path: '/video-tools/voice-to-text', title: '视频转文字' },
     ],
   },
 ]

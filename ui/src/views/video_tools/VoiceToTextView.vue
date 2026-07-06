@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <div><h3>视频工具 · 语音转文字</h3></div>
+      <div><h3>视频工具 · 视频转文字</h3></div>
       <div class="header-actions">
         <el-button @click="goToConfig">工具配置</el-button>
       </div>
@@ -11,13 +11,26 @@
       <el-card class="section-card">
         <template #header><span>输入视频</span></template>
         <el-radio-group v-model="inputMode" :disabled="processing">
+          <el-radio-button value="page">页面链接</el-radio-button>
           <el-radio-button value="upload">上传文件</el-radio-button>
           <el-radio-button value="url">视频链接</el-radio-button>
         </el-radio-group>
 
         <el-row :gutter="16" class="input-row">
           <el-col :xs="24" :md="16">
-            <div v-if="inputMode === 'upload'" class="input-area">
+            <div v-if="inputMode === 'page'" class="input-area">
+              <el-input
+                v-model="pageUrl"
+                placeholder="https://www.bilibili.com/video/BV... 或 YouTube 分享链接"
+                :disabled="processing"
+                clearable
+              />
+              <p class="hint">
+                粘贴哔哩哔哩、YouTube、抖音等平台的视频页面链接，系统将自动解析并下载后转写。
+              </p>
+            </div>
+
+            <div v-else-if="inputMode === 'upload'" class="input-area input-area--upload">
               <el-upload
                 drag
                 :auto-upload="false"
@@ -58,9 +71,10 @@
 
           <el-col :xs="24" :md="8">
             <div class="side-panel">
-              <div class="side-panel-title">在线视频解析</div>
+              <div class="side-panel-title">备用解析方式</div>
               <p class="hint">
-                从哔哩哔哩、抖音等平台提取 MP4 下载地址或下载下来，再粘贴或上传到左侧使用本工具转写。
+                「页面链接」使用内置 yt-dlp 自动解析下载。若解析或下载失败，可尝试下方在线工具提取
+                MP4 直链或下载到本地，再切换到「上传文件」或「视频链接」继续转写。
               </p>
               <ul class="tool-links">
                 <li>
@@ -79,7 +93,7 @@
 
       <el-card class="section-card" style="margin-top:16px">
         <template #header><span>处理进度</span></template>
-        <el-scrollbar max-height="240px">
+        <el-scrollbar ref="progressScrollbarRef" max-height="120px">
           <pre class="log-panel">{{ progressLog || '等待开始...' }}</pre>
         </el-scrollbar>
       </el-card>
@@ -96,33 +110,41 @@
             </div>
           </div>
         </template>
-        <el-input v-model="resultText" type="textarea" :rows="12" readonly />
+        <el-input
+          v-model="resultText"
+          type="textarea"
+          :rows="12"
+          placeholder="识别完成后可在此直接编辑修正"
+        />
       </el-card>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { UploadFile } from 'element-plus'
+import type { ScrollbarInstance, UploadFile } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { apiGet, apiStreamPost } from '../../composables/useApi'
 
 const router = useRouter()
 
-const inputMode = ref<'upload' | 'url'>('upload')
+const inputMode = ref<'upload' | 'url' | 'page'>('page')
 const selectedFile = ref<File | null>(null)
 const videoUrl = ref('')
+const pageUrl = ref('')
 const processing = ref(false)
 const progressLog = ref('')
+const progressScrollbarRef = ref<ScrollbarInstance>()
 const resultText = ref<string | null>(null)
 
 const canStart = computed(() => {
   if (processing.value) return false
   if (inputMode.value === 'upload') return !!selectedFile.value
-  return !!videoUrl.value.trim()
+  if (inputMode.value === 'url') return !!videoUrl.value.trim()
+  return !!pageUrl.value.trim()
 })
 
 function onFileChange(file: UploadFile) {
@@ -135,6 +157,17 @@ function onFileRemove() {
 
 function appendLog(line: string) {
   progressLog.value = progressLog.value ? `${progressLog.value}\n${line}` : line
+  scrollProgressToBottom()
+}
+
+function scrollProgressToBottom() {
+  nextTick(() => {
+    const scrollbar = progressScrollbarRef.value
+    const wrap = scrollbar?.wrapRef
+    if (!scrollbar || !wrap) return
+    scrollbar.update()
+    scrollbar.setScrollTop(wrap.scrollHeight)
+  })
 }
 
 function goToConfig() {
@@ -185,7 +218,7 @@ async function startTranscribe() {
   resultText.value = null
 
   try {
-    let body: FormData | { url: string }
+    let body: FormData | { url: string; url_type?: 'direct' | 'page' }
     if (inputMode.value === 'upload') {
       if (!selectedFile.value) {
         ElMessage.warning('请先选择 MP4 文件')
@@ -194,8 +227,10 @@ async function startTranscribe() {
       const formData = new FormData()
       formData.append('file', selectedFile.value)
       body = formData
+    } else if (inputMode.value === 'page') {
+      body = { url: pageUrl.value.trim(), url_type: 'page' }
     } else {
-      body = { url: videoUrl.value.trim() }
+      body = { url: videoUrl.value.trim(), url_type: 'direct' }
     }
 
     await apiStreamPost('/video-tools/admin/voice-to-text', body, (event, data) => {
@@ -204,7 +239,7 @@ async function startTranscribe() {
       } else if (event === 'done' && typeof data.text === 'string') {
         resultText.value = data.text
         appendLog('转写完成')
-        ElMessage.success('语音转文字完成')
+        ElMessage.success('视频转文字完成')
       } else if (event === 'error') {
         const detail = typeof data.detail === 'string' ? data.detail : '转写失败'
         appendLog(`错误: ${detail}`)
@@ -262,50 +297,65 @@ async function copyPromptVersion() {
 
 <style scoped>
 .input-row {
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 .input-area {
-  min-height: 180px;
+  min-height: auto;
+}
+
+.input-area--upload :deep(.el-upload-dragger) {
+  padding: 16px 12px;
+}
+
+.input-area--upload :deep(.el-upload-dragger .el-icon--upload) {
+  margin-bottom: 6px;
+  font-size: 36px;
+}
+
+.input-area--upload :deep(.el-upload__tip) {
+  margin-top: 4px;
+}
+
+.input-area .hint {
+  margin-top: 6px;
 }
 
 .start-btn {
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 .side-panel {
-  height: 100%;
-  min-height: 180px;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border-radius: 8px;
   background: var(--el-fill-color-lighter);
   border: 1px solid var(--el-border-color-lighter);
 }
 
 .side-panel-title {
-  margin-bottom: 8px;
-  font-size: 14px;
+  margin-bottom: 6px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
 
 .hint {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--el-text-color-secondary);
 }
 
 .tool-links {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
-  font-size: 13px;
-  line-height: 1.8;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .tool-links li + li {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .tool-links a {
@@ -340,10 +390,10 @@ async function copyPromptVersion() {
 
 .log-panel {
   margin: 0;
-  padding: 8px 4px;
+  padding: 4px 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--el-text-color-regular);
