@@ -35,6 +35,7 @@ export const tools: ToolDefinition[] = [
       { path: '/gateway/observability', title: '请求日志' },
       { path: '/gateway/upstream-config', title: '上游配置' },
       { path: '/gateway/model-capability-probe', title: '能力测试' },
+      { path: '/gateway/token-speed-test', title: 'Token 测试' },
       { path: '/gateway/vram-calculator', title: '显存计算' },
     ],
   },

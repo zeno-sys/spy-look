@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -36,8 +38,13 @@ from db.upstreams import (
     set_default_upstream,
     update_upstream,
 )
-from tools.gateway.schemas import ModelCapabilityProbeModelsCustomRequest, ModelCapabilityProbeRequest
+from tools.gateway.schemas import (
+    ModelCapabilityProbeModelsCustomRequest,
+    ModelCapabilityProbeRequest,
+    TokenSpeedTestRequest,
+)
 from tools.gateway.services.capability_probe import probe_model_capabilities
+from tools.gateway.services.token_speed_test import test_token_speed
 from tools.gateway.services.upstream_client import (
     UpstreamClient,
     UpstreamRuntimeConfig,
@@ -45,6 +52,10 @@ from tools.gateway.services.upstream_client import (
 )
 
 router = APIRouter(prefix="/gateway/admin", tags=["gateway-admin"])
+
+
+def _sse_event(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 async def read_request_json(request: Request) -> Any:
@@ -444,6 +455,105 @@ async def _resolve_probe_credentials(
     uri = str(body.uri).strip()
     api_key = str(body.api_key).strip()
     return uri, api_key, str(body.model).strip()
+
+
+async def _resolve_speed_test_credentials(
+    session: AsyncSession,
+    body: TokenSpeedTestRequest,
+) -> tuple[str, str, str]:
+    if body.mode == "upstream":
+        row = await get_upstream_runtime(session, int(body.upstream_id))
+        if not row:
+            raise HTTPException(status_code=400, detail="upstream not found")
+        if not row.get("enabled"):
+            raise HTTPException(status_code=400, detail="upstream is disabled")
+        uri = str(row.get("base_url") or "").strip()
+        api_key = str(row.get("api_key") or "").strip()
+        if not uri or not api_key:
+            raise HTTPException(status_code=400, detail="incomplete upstream configuration")
+        return uri, api_key, str(body.model).strip()
+    uri = str(body.uri).strip()
+    api_key = str(body.api_key).strip()
+    return uri, api_key, str(body.model).strip()
+
+
+@router.post("/token-speed-test")
+async def admin_token_speed_test(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    raw = await read_request_json(request)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    try:
+        body = TokenSpeedTestRequest.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from None
+
+    uri, api_key, model = await _resolve_speed_test_credentials(session, body)
+    t0 = time.perf_counter()
+    report = await asyncio.to_thread(
+        test_token_speed, uri, api_key, model,
+        timeout=body.timeout, max_tokens=body.max_tokens,
+    )
+    report["total_elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
+    return JSONResponse(content=report)
+
+
+@router.post("/token-speed-test/stream")
+async def admin_token_speed_test_stream(request: Request, session: AsyncSession = Depends(get_session)) -> StreamingResponse:
+    raw = await read_request_json(request)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    try:
+        body = TokenSpeedTestRequest.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from None
+
+    uri, api_key, model = await _resolve_speed_test_credentials(session, body)
+
+    async def event_stream() -> AsyncIterator[str]:
+        queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def on_progress(stage: str, message: str, percent: int, extra: dict[str, Any] | None = None) -> None:
+            data: dict[str, Any] = {"stage": stage, "message": message, "percent": percent}
+            if extra:
+                data.update(extra)
+            loop.call_soon_threadsafe(queue.put_nowait, ("progress", data))
+
+        async def run_job() -> None:
+            t0 = time.perf_counter()
+            try:
+                report = await asyncio.to_thread(
+                    test_token_speed,
+                    uri,
+                    api_key,
+                    model,
+                    timeout=body.timeout,
+                    max_tokens=body.max_tokens,
+                    on_progress=on_progress,
+                )
+                report["total_elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
+                await queue.put(("done", report))
+            except Exception as exc:
+                await queue.put(("error", {"detail": str(exc)}))
+            finally:
+                await queue.put(("__close__", {}))
+
+        task = asyncio.create_task(run_job())
+        try:
+            while True:
+                event, data = await queue.get()
+                if event == "__close__":
+                    break
+                yield _sse_event(event, data)
+                if event in ("done", "error"):
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+                with asyncio.suppress(asyncio.CancelledError):
+                    await task
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/model-capability-probe")
