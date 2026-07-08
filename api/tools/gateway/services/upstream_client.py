@@ -36,15 +36,22 @@ def upstream_runtime_from_row(row: dict[str, Any]) -> UpstreamRuntimeConfig | No
     if not row:
         return None
     base = str(row.get("base_url") or "").strip()
-    key = str(row.get("api_key") or "")
-    if not base or not key:
+    if not base:
         return None
     return UpstreamRuntimeConfig(
         base_url=base,
-        api_key=key,
+        api_key=str(row.get("api_key") or "").strip(),
         timeout_seconds=float(row.get("timeout_seconds") or 60.0),
         trust_env=bool(row.get("trust_env")),
     )
+
+
+def upstream_auth_headers(api_key: str) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    key = str(api_key or "").strip()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    return headers
 
 
 class UpstreamClient:
@@ -63,10 +70,7 @@ class UpstreamClient:
         await self._client.aclose()
 
     def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self._cfg.api_key}",
-            "Content-Type": "application/json",
-        }
+        return upstream_auth_headers(self._cfg.api_key)
 
     async def list_models(self) -> httpx.Response:
         return await self._client.get("/models", headers=self._headers())

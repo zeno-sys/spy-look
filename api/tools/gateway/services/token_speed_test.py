@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 from tools.gateway.services.capability_probe import _normalize_chat_url
+from tools.gateway.services.upstream_client import upstream_auth_headers
 from tools.gateway.services.utils import estimate_tokens
 
 _CHINESE_TEST_PROMPT = (
@@ -34,10 +35,7 @@ def _post_stream_speed(
     model: str,
     max_tokens: int,
 ) -> dict[str, Any]:
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
-    }
+    headers = upstream_auth_headers(api_key)
     body: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": _CHINESE_TEST_PROMPT}],

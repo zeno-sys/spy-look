@@ -150,7 +150,9 @@
           <el-table-column prop="label" label="轮次" width="100" />
           <el-table-column prop="completion_tokens" label="输出 tokens" width="120" />
           <el-table-column prop="ttft_ms" label="首 token (ms)" width="130" />
-          <el-table-column prop="generation_ms" label="生成耗时 (ms)" width="130" />
+          <el-table-column label="生成耗时 (s)" width="130">
+            <template #default="{ row }">{{ formatGenerationSeconds(row.generation_ms) }}</template>
+          </el-table-column>
           <el-table-column prop="tokens_per_sec" label="速度 (tokens/s)" width="140" />
           <el-table-column prop="status" label="状态" />
         </el-table>
@@ -237,6 +239,13 @@ const upstreamOptions = ref<any[]>([])
 const upstreamModels = ref<string[]>([])
 const customModels = ref<string[]>([])
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+function formatGenerationSeconds(ms: number | string | null | undefined): string {
+  if (ms === '-' || ms == null) return '-'
+  const n = Number(ms)
+  if (Number.isNaN(n)) return String(ms)
+  return (n / 1000).toFixed(2)
+}
 
 const allRuns = computed(() => {
   if (!report.value) return []

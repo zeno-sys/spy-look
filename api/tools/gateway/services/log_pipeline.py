@@ -3,15 +3,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from sqlmodel.ext.asyncio.session import AsyncSession
-
+from db.engine import async_engine, async_session_factory
 from db.logs import log_event
 from tools.gateway.services.utils import stream_tokens_from_sse
 
 
 def schedule_log_event(
     *,
-    session: AsyncSession,
     event: dict[str, Any],
     stream_body: str | None = None,
     request_body: dict[str, Any] | None = None,
@@ -28,7 +26,8 @@ def schedule_log_event(
             event["input_tokens"] = input_tokens
             event["output_tokens"] = output_tokens
             event["total_tokens"] = total_tokens
-        await log_event(session, event)
+        async with async_session_factory(async_engine) as session:
+            await log_event(session, event)
 
     task = asyncio.create_task(_persist())
     log_tasks.add(task)

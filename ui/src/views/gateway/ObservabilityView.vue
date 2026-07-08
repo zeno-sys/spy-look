@@ -180,7 +180,15 @@
       </div>
       <el-form :inline="true" :model="filters" size="small" class="filter-form">
         <el-form-item label="Model">
-          <el-input v-model="filters.model" placeholder="model" clearable style="width:160px" />
+          <el-select
+            v-model="filters.model"
+            placeholder="全部"
+            clearable
+            filterable
+            style="width:200px"
+          >
+            <el-option v-for="m in logModelOptions" :key="m" :label="m" :value="m" />
+          </el-select>
         </el-form-item>
         <el-form-item label="Client IP">
           <el-input v-model="filters.client_ip" placeholder="client_ip" clearable style="width:140px" />
@@ -200,6 +208,18 @@
       <el-table :data="logs" v-loading="logsLoading" stripe size="small" @sort-change="onSortChange">
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="model" label="Model" min-width="120" />
+        <el-table-column label="源模型" width="100" align="center">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.upstream_model"
+              size="small"
+              text
+              type="primary"
+              @click="openUpstreamModelModal(row)"
+            >查看</el-button>
+            <span v-else class="log-upstream-model-empty">—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status_code" label="Status" width="80" sortable="custom">
           <template #default="{ row }">
             <el-tag :type="row.status_code === 200 ? 'success' : 'danger'" size="small">{{ row.status_code }}</el-tag>
@@ -310,15 +330,15 @@
         </section>
 
         <section class="client-info-section">
-          <h4 class="client-info-heading">session_id</h4>
+          <h4 class="client-info-heading">X-Session-Id</h4>
           <div class="client-info-callout">
             <p>
-              在 <code>POST /v1/chat/completions</code> 请求体中可选携带
-              <code>session_id</code>，用于观测页按「应用 → 会话 → 日志」分组追踪。
+              在 <code>POST /v1/chat/completions</code> 请求头中可选携带
+              <code>X-Session-Id</code>，用于观测页按「应用 → 会话 → 日志」分组追踪。
             </p>
             <ul>
               <li>不传时默认为 <code>default</code></li>
-              <li>仅用于网关落库，转发上游前会自动移除</li>
+              <li>同时用于网关路由的会话粘性（一致性哈希选源）</li>
               <li>建议按业务语义命名，如 <code>user-42-chat-1</code>、<code>thread-9</code></li>
             </ul>
           </div>
@@ -335,7 +355,7 @@
           </div>
           <div class="client-info-example">
             <div class="client-info-example-head">
-              <span class="client-info-example-label">对话（含 session_id）</span>
+              <span class="client-info-example-label">对话（含 X-Session-Id）</span>
               <el-button size="small" text @click="copyClientInfoCurl(clientInfoCurlChat)">复制</el-button>
             </div>
             <pre>{{ clientInfoCurlChat }}</pre>
@@ -412,6 +432,8 @@ const filters = reactive({
   timeRange: null as [string, string] | null,
 })
 
+const logModelOptions = ref<string[]>([])
+
 const sortOrder = reactive({ field: 'created_at', dir: 'desc' as 'asc' | 'desc' })
 
 const modalVisible = ref(false)
@@ -446,7 +468,7 @@ const clientInfoCurlModels = computed(() => {
 const clientInfoCurlChat = computed(() => {
   const d = clientInfoData.value
   if (!d) return ''
-  return `curl ${d.v1_chat_completions_url} -H "Content-Type: application/json" -H "Authorization: Bearer ${d.gateway_api_key}" -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello!"}],"session_id":"user-42-chat-1"}'`
+  return `curl ${d.v1_chat_completions_url} -H "Content-Type: application/json" -H "Authorization: Bearer ${d.gateway_api_key}" -H "X-Session-Id: user-42-chat-1" -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello!"}]}'`
 })
 
 const showAppPicker = ref(false)
@@ -558,6 +580,25 @@ async function loadSessions() {
   finally { sessionsLoading.value = false }
 }
 
+async function loadLogModelOptions() {
+  if (!selectedApp.value || !selectedSession.value) {
+    logModelOptions.value = []
+    return
+  }
+  try {
+    const data = await apiGet<any>('/gateway/logs/models', {
+      app_id: selectedApp.value,
+      session_id: selectedSession.value,
+    })
+    logModelOptions.value = data.items || []
+    if (filters.model && !logModelOptions.value.includes(filters.model)) {
+      logModelOptions.value = [filters.model, ...logModelOptions.value]
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
+}
+
 async function searchLogs() {
   logsLoading.value = true
   try {
@@ -608,8 +649,10 @@ function selectApp(row: any) {
 function selectSession(row: any) {
   selectedSession.value = row.session_id
   logCurrentPage.value = 1
+  filters.model = ''
   currentView.value = 'logs'
   router.replace({ query: { app_id: selectedApp.value, session_id: row.session_id } })
+  loadLogModelOptions()
   searchLogs()
 }
 
@@ -810,6 +853,16 @@ function toggleStreamView() {
   }
 }
 
+function openUpstreamModelModal(row: any) {
+  const upstreamModel = String(row.upstream_model || '').trim()
+  if (!upstreamModel) return
+  modalTitle.value = `源模型 · 日志 #${row.id}`
+  modalCopyText.value = upstreamModel
+  modalContent.value = escapeHtml(upstreamModel)
+  modalStreamToggle.value = false
+  modalVisible.value = true
+}
+
 function openModal(title: string, body: string) {
   modalTitle.value = title
   setModalJson(typeof body === 'string' ? body : JSON.stringify(body, null, 2))
@@ -906,6 +959,7 @@ onMounted(() => {
     selectedApp.value = String(q.app_id)
     selectedSession.value = String(q.session_id)
     currentView.value = 'logs'
+    loadLogModelOptions()
     searchLogs()
   } else if (q.app_id) {
     selectedApp.value = String(q.app_id)

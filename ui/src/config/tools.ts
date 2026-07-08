@@ -23,7 +23,7 @@ export const tools: ToolDefinition[] = [
   {
     id: 'gateway',
     title: '大模型网关',
-    description: 'OpenAI 兼容代理，请求追踪、上游 Failover、模型能力探测。',
+    description: 'OpenAI 兼容代理，请求追踪、对外模型路由、模型能力探测。',
     icon: 'Connection',
     accent: {
       gradient: 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)',
@@ -33,7 +33,7 @@ export const tools: ToolDefinition[] = [
     homePath: '/gateway/observability',
     menuItems: [
       { path: '/gateway/observability', title: '请求日志' },
-      { path: '/gateway/upstream-config', title: '上游配置' },
+      { path: '/gateway/model-config', title: '模型配置' },
       { path: '/gateway/model-capability-probe', title: '能力测试' },
       { path: '/gateway/token-speed-test', title: 'Token 测试' },
       { path: '/gateway/vram-calculator', title: '显存计算' },

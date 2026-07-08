@@ -19,6 +19,7 @@ from db.logs import (
     get_apps_dashboard_stats,
     get_log,
     list_log_apps,
+    list_log_models,
     list_log_sessions,
     query_logs,
 )
@@ -59,6 +60,27 @@ async def get_logs(
         offset=offset,
     )
     return JSONResponse(content={"items": items, "total": total, "limit": limit, "offset": offset})
+
+
+@router.get("/models")
+async def get_log_models(
+    app_id: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    if not app_id or not str(app_id).strip():
+        raise HTTPException(status_code=422, detail="app_id is required")
+    if not session_id or not str(session_id).strip():
+        raise HTTPException(status_code=422, detail="session_id is required")
+    try:
+        models = await list_log_models(
+            session,
+            app_id=str(app_id).strip(),
+            session_id=str(session_id).strip(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(content={"items": models})
 
 
 @router.get("/apps/stats")

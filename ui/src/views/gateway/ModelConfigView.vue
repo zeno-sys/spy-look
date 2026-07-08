@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <div><h3>大模型网关 · 上游配置</h3></div>
+      <div><h3>大模型网关 · 模型配置</h3></div>
       <div class="header-actions">
         <el-button type="primary" @click="loadAll">刷新列表</el-button>
       </div>
@@ -37,11 +37,12 @@
       <!-- Upstreams -->
       <el-card class="section-card">
         <template #header>
-          <div class="card-header"><span>已配置上游</span>
-            <el-button type="primary" @click="openCreateUpstreamDialog">新增上游</el-button>
+          <div class="card-header">
+            <span>模型源配置</span>
+            <el-button type="primary" @click="openCreateUpstreamDialog">新增模型源</el-button>
           </div>
         </template>
-        <p class="hint">连接失败或超时时，将按列表顺序（默认优先）尝试其它已启用上游。</p>
+        <p class="hint">配置真实大模型提供商的连接信息；保存前会自动请求上游 <code>/models</code> 测试连通性，通过后方可保存。对外模型通过下方绑定映射到具体模型源。</p>
         <el-table :data="upstreams" stripe size="small">
           <el-table-column prop="id" label="ID" width="60" />
           <el-table-column prop="name" label="名称" width="120" />
@@ -56,17 +57,38 @@
               <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="对外服务" width="90">
-            <template #default="{ row }">
-              <el-tag v-if="row.is_default" type="warning" size="small">对外服务</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="280" fixed="right">
+          <el-table-column label="操作" width="220" fixed="right">
             <template #default="{ row }">
               <el-button size="small" @click="testUpstream(row)">探测</el-button>
               <el-button size="small" @click="openEditUpstreamDialog(row)">编辑</el-button>
-              <el-button v-if="!row.is_default && row.enabled" size="small" @click="setDefaultUpstream(row.id)">切为对外</el-button>
-              <el-button size="small" type="danger" @click="confirmDeleteUpstream(row.id)">删除</el-button>
+              <el-button size="small" type="danger" @click="confirmDeleteUpstream(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+
+      <!-- Public Models -->
+      <el-card class="section-card">
+        <template #header>
+          <div class="card-header">
+            <span>对外模型配置</span>
+            <el-button type="primary" @click="openCreatePublicModelDialog">新增对外模型</el-button>
+          </div>
+        </template>
+        <p class="hint">客户端调用 <code>/v1/models</code> 与 <code>/v1/chat/completions</code> 时仅能看到此处配置的对外模型名。</p>
+        <el-table :data="publicModels" stripe size="small">
+          <el-table-column prop="id" label="ID" width="60" />
+          <el-table-column prop="name" label="对外模型名" min-width="160" />
+          <el-table-column prop="bindings_summary" label="绑定" min-width="260" show-overflow-tooltip />
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" @click="openEditPublicModelDialog(row)">编辑</el-button>
+              <el-button size="small" type="danger" @click="confirmDeletePublicModel(row.id)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -107,7 +129,7 @@
     </el-dialog>
 
     <!-- Upstream Dialog -->
-    <el-dialog v-model="showUpstreamDialog" :title="editingUpstreamId ? '编辑上游' : '新增上游'" width="560px" destroy-on-close center>
+    <el-dialog v-model="showUpstreamDialog" :title="editingUpstreamId ? '编辑模型源' : '新增模型源'" width="560px" destroy-on-close center>
       <el-form :model="upstreamForm" label-position="top">
         <el-row :gutter="12">
           <el-col :span="12">
@@ -121,8 +143,8 @@
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item :label="'API Key' + (editingUpstreamId ? ' (留空不修改)' : '')">
-          <el-input v-model="upstreamForm.api_key" type="password" show-password />
+        <el-form-item :label="editingUpstreamId ? 'API Key (留空不修改)' : 'API Key (可选)'">
+          <el-input v-model="upstreamForm.api_key" type="password" show-password placeholder="无需鉴权的模型源可留空" />
         </el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
@@ -136,8 +158,64 @@
         </el-row>
         <el-form-item><el-checkbox v-model="upstreamForm.enabled">启用</el-checkbox></el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="saveUpstream" :loading="upstreamSaving">保存</el-button>
+          <el-button type="primary" @click="saveUpstream" :loading="upstreamSaving">
+            {{ upstreamSaving ? '测试连通性中…' : '保存' }}
+          </el-button>
           <el-button @click="showUpstreamDialog = false">取消</el-button>
+        </el-form-item>
+      </el-form>
+    </el-dialog>
+
+    <!-- Public Model Dialog -->
+    <el-dialog
+      v-model="showPublicModelDialog"
+      :title="editingPublicModelId ? '编辑对外模型' : '新增对外模型'"
+      width="680px"
+      destroy-on-close
+      center
+    >
+      <el-form :model="publicModelForm" label-position="top">
+        <el-form-item label="对外模型名称">
+          <el-input v-model="publicModelForm.name" placeholder="客户端请求时使用的 model 名称" />
+        </el-form-item>
+        <el-form-item><el-checkbox v-model="publicModelForm.enabled">启用</el-checkbox></el-form-item>
+
+        <div class="route-list-header">
+          <span>模型源绑定</span>
+          <el-button size="small" @click="addRouteRow">添加绑定</el-button>
+        </div>
+        <p class="hint">可绑定多个模型源实现负载均衡；同一客户端通过请求头 <code>X-Session-Id</code> 保持会话粘性。</p>
+
+        <div v-for="(route, index) in publicModelForm.routes" :key="index" class="route-row">
+          <el-select
+            v-model="route.upstream_id"
+            placeholder="选择模型源"
+            style="width: 180px"
+            @change="onRouteUpstreamChange(route)"
+          >
+            <el-option
+              v-for="u in enabledUpstreams"
+              :key="u.id"
+              :label="u.name"
+              :value="u.id"
+            />
+          </el-select>
+          <el-select
+            v-model="route.upstream_model"
+            placeholder="选择实际模型"
+            style="flex: 1"
+            filterable
+            :loading="route.loading"
+            :disabled="!route.upstream_id"
+          >
+            <el-option v-for="m in route.modelOptions" :key="m" :label="m" :value="m" />
+          </el-select>
+          <el-button type="danger" text @click="removeRouteRow(index)" :disabled="publicModelForm.routes.length <= 1">删除</el-button>
+        </div>
+
+        <el-form-item style="margin-top: 16px">
+          <el-button type="primary" @click="savePublicModel" :loading="publicModelSaving">保存</el-button>
+          <el-button @click="showPublicModelDialog = false">取消</el-button>
         </el-form-item>
       </el-form>
     </el-dialog>
@@ -163,13 +241,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiGet, apiPost, apiPatch, apiDelete } from '../../composables/useApi'
 import { formatBeijingTime } from '../../utils/formatTime'
 
+interface RouteFormRow {
+  upstream_id: number | null
+  upstream_model: string
+  modelOptions: string[]
+  loading: boolean
+}
+
 const clientKeys = ref<any[]>([])
 const upstreams = ref<any[]>([])
+const publicModels = ref<any[]>([])
+
+const enabledUpstreams = computed(() => upstreams.value.filter((u) => u.enabled))
 
 const showCreateKeyDialog = ref(false)
 const newKeyForm = reactive({ app_id: '', key: '' })
@@ -188,11 +276,26 @@ const upstreamForm = reactive({
   trust_env: false, enabled: true,
 })
 
+const showPublicModelDialog = ref(false)
+const editingPublicModelId = ref(0)
+const publicModelSaving = ref(false)
+const publicModelForm = reactive({
+  name: '',
+  enabled: true,
+  routes: [] as RouteFormRow[],
+})
+
 const showTestDialog = ref(false)
 const testResult = ref<any>({})
 const testModels = ref<string[]>([])
 
-async function loadAll() { await Promise.all([loadClientKeys(), loadUpstreams()]) }
+function emptyRouteRow(): RouteFormRow {
+  return { upstream_id: null, upstream_model: '', modelOptions: [], loading: false }
+}
+
+async function loadAll() {
+  await Promise.all([loadClientKeys(), loadUpstreams(), loadPublicModels()])
+}
 
 async function loadClientKeys() {
   try { const d = await apiGet<any>('/gateway/admin/gateway-client-keys'); clientKeys.value = d.items || [] }
@@ -202,6 +305,16 @@ async function loadClientKeys() {
 async function loadUpstreams() {
   try { const d = await apiGet<any>('/gateway/admin/upstreams'); upstreams.value = d.items || [] }
   catch (e: any) { ElMessage.error(e.message) }
+}
+
+async function loadPublicModels() {
+  try { const d = await apiGet<any>('/gateway/admin/public-models'); publicModels.value = d.items || [] }
+  catch (e: any) { ElMessage.error(e.message) }
+}
+
+async function loadUpstreamModels(upstreamId: number): Promise<string[]> {
+  const d = await apiGet<any>(`/gateway/admin/upstreams/${upstreamId}/models`)
+  return d.models || []
 }
 
 async function generateKey() {
@@ -275,14 +388,123 @@ async function saveUpstream() {
   finally { upstreamSaving.value = false }
 }
 
-async function confirmDeleteUpstream(id: number) {
-  try { await ElMessageBox.confirm('确认删除此上游？', '确认', { type: 'warning' }) } catch { return }
-  try { await apiDelete(`/gateway/admin/upstreams/${id}`); await loadUpstreams(); ElMessage.success('已删除') }
+async function confirmDeleteUpstream(row: any) {
+  try {
+    const d = await apiGet<any>(`/gateway/admin/upstreams/${row.id}/bindings`)
+    if ((d.items || []).length > 0) {
+      const summary = d.items
+        .map((b: any) => `${b.public_model_name}/${b.upstream_model}`)
+        .join('、')
+      await ElMessageBox.alert(
+        `该模型源「${row.name}」仍被以下对外模型绑定：\n\n${summary}\n\n请先在「对外模型配置」中解除绑定后再删除。`,
+        '无法删除',
+        { type: 'warning', confirmButtonText: '我知道了' },
+      )
+      return
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message)
+    return
+  }
+  try { await ElMessageBox.confirm(`确认删除模型源「${row.name}」？`, '确认', { type: 'warning' }) } catch { return }
+  try { await apiDelete(`/gateway/admin/upstreams/${row.id}`); await loadUpstreams(); ElMessage.success('已删除') }
   catch (e: any) { ElMessage.error(e.message) }
 }
 
-async function setDefaultUpstream(id: number) {
-  try { await apiPost(`/gateway/admin/upstreams/${id}/set-default`); await loadUpstreams(); ElMessage.success('已设为对外服务') }
+function addRouteRow() {
+  publicModelForm.routes.push(emptyRouteRow())
+}
+
+function removeRouteRow(index: number) {
+  publicModelForm.routes.splice(index, 1)
+}
+
+async function onRouteUpstreamChange(route: RouteFormRow) {
+  route.upstream_model = ''
+  route.modelOptions = []
+  if (!route.upstream_id) return
+  route.loading = true
+  try {
+    route.modelOptions = await loadUpstreamModels(route.upstream_id)
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    route.loading = false
+  }
+}
+
+function openCreatePublicModelDialog() {
+  editingPublicModelId.value = 0
+  publicModelForm.name = ''
+  publicModelForm.enabled = true
+  publicModelForm.routes = [emptyRouteRow()]
+  showPublicModelDialog.value = true
+}
+
+async function openEditPublicModelDialog(row: any) {
+  editingPublicModelId.value = row.id
+  publicModelForm.name = row.name
+  publicModelForm.enabled = row.enabled
+  publicModelForm.routes = []
+  showPublicModelDialog.value = true
+  try {
+    const detail = await apiGet<any>(`/gateway/admin/public-models/${row.id}`)
+    publicModelForm.routes = await Promise.all(
+      (detail.routes || []).map(async (r: any) => {
+        const routeRow: RouteFormRow = {
+          upstream_id: r.upstream_id,
+          upstream_model: r.upstream_model,
+          modelOptions: [],
+          loading: true,
+        }
+        try {
+          routeRow.modelOptions = await loadUpstreamModels(r.upstream_id)
+        } catch {
+          routeRow.modelOptions = r.upstream_model ? [r.upstream_model] : []
+        } finally {
+          routeRow.loading = false
+        }
+        return routeRow
+      }),
+    )
+    if (!publicModelForm.routes.length) {
+      publicModelForm.routes = [emptyRouteRow()]
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function savePublicModel() {
+  const routes = publicModelForm.routes
+    .filter((r) => r.upstream_id && r.upstream_model)
+    .map((r) => ({ upstream_id: r.upstream_id, upstream_model: r.upstream_model, enabled: true }))
+  if (!publicModelForm.name.trim()) {
+    ElMessage.warning('请填写对外模型名称')
+    return
+  }
+  if (!routes.length) {
+    ElMessage.warning('请至少配置一条模型源绑定')
+    return
+  }
+  publicModelSaving.value = true
+  try {
+    const body = { name: publicModelForm.name.trim(), enabled: publicModelForm.enabled, routes }
+    if (editingPublicModelId.value) {
+      await apiPatch(`/gateway/admin/public-models/${editingPublicModelId.value}`, body)
+    } else {
+      await apiPost('/gateway/admin/public-models', body)
+    }
+    showPublicModelDialog.value = false
+    await loadPublicModels()
+    ElMessage.success(editingPublicModelId.value ? '已更新' : '已创建')
+  } catch (e: any) { ElMessage.error(e.message) }
+  finally { publicModelSaving.value = false }
+}
+
+async function confirmDeletePublicModel(id: number) {
+  try { await ElMessageBox.confirm('确认删除此对外模型？', '确认', { type: 'warning' }) } catch { return }
+  try { await apiDelete(`/gateway/admin/public-models/${id}`); await loadPublicModels(); ElMessage.success('已删除') }
   catch (e: any) { ElMessage.error(e.message) }
 }
 
@@ -298,3 +520,20 @@ async function testUpstream(row: any) {
 
 onMounted(loadAll)
 </script>
+
+<style scoped>
+.route-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.route-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+</style>

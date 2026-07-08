@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from db.models import SpyLookUpstream
+from db.public_models import count_upstream_route_refs, list_upstream_bindings
 
 
 def mask_api_key(api_key: str) -> str:
@@ -21,13 +22,14 @@ def mask_api_key(api_key: str) -> str:
 
 
 def _upstream_row_public(row: SpyLookUpstream) -> dict[str, Any]:
-    d = row.model_dump(mode='json')
-    d["api_key_masked"] = mask_api_key(d.pop("api_key"))
+    d = row.model_dump(mode="json")
+    d.pop("api_key", None)
+    d["api_key_masked"] = mask_api_key(row.api_key)
     return d
 
 
 def _upstream_row_runtime(row: SpyLookUpstream) -> dict[str, Any]:
-    return row.model_dump(mode='json')
+    return row.model_dump(mode="json")
 
 
 async def _scalar_one(session: AsyncSession, stmt) -> Any:
@@ -41,16 +43,16 @@ async def _scalar_all(session: AsyncSession, stmt) -> list[Any]:
 
 
 async def list_upstreams(session: AsyncSession) -> list[dict[str, Any]]:
-    stmt = select(SpyLookUpstream).order_by(SpyLookUpstream.is_default.desc(), SpyLookUpstream.id.asc())
+    stmt = select(SpyLookUpstream).order_by(SpyLookUpstream.id.asc())
     rows = await _scalar_all(session, stmt)
     return [_upstream_row_public(row) for row in rows]
 
 
-async def list_failover_upstream_rows(session: AsyncSession) -> list[dict[str, Any]]:
+async def list_enabled_upstream_rows(session: AsyncSession) -> list[dict[str, Any]]:
     stmt = (
         select(SpyLookUpstream)
         .where(SpyLookUpstream.enabled == True)
-        .order_by(SpyLookUpstream.is_default.desc(), SpyLookUpstream.id.asc())
+        .order_by(SpyLookUpstream.id.asc())
     )
     rows = await _scalar_all(session, stmt)
     return [_upstream_row_runtime(row) for row in rows]
@@ -66,27 +68,6 @@ async def get_upstream_runtime(session: AsyncSession, upstream_id: int) -> dict[
     return _upstream_row_runtime(row) if row else None
 
 
-async def get_default_upstream_row(session: AsyncSession) -> dict[str, Any] | None:
-    stmt = (
-        select(SpyLookUpstream)
-        .where(SpyLookUpstream.enabled == True, SpyLookUpstream.is_default == True)
-        .order_by(SpyLookUpstream.id.asc())
-        .limit(1)
-    )
-    row = await _scalar_one(session, stmt)
-    if row:
-        return _upstream_row_runtime(row)
-
-    stmt = (
-        select(SpyLookUpstream)
-        .where(SpyLookUpstream.enabled == True)
-        .order_by(SpyLookUpstream.id.asc())
-        .limit(1)
-    )
-    row = await _scalar_one(session, stmt)
-    return _upstream_row_runtime(row) if row else None
-
-
 async def create_upstream(
     session: AsyncSession,
     *,
@@ -96,7 +77,6 @@ async def create_upstream(
     trust_env: bool = False,
     timeout_seconds: float = 60.0,
     enabled: bool = True,
-    is_default: bool = False,
 ) -> int:
     upstream = SpyLookUpstream(
         name=name.strip(),
@@ -105,29 +85,11 @@ async def create_upstream(
         trust_env=trust_env,
         timeout_seconds=float(timeout_seconds),
         enabled=enabled,
-        is_default=False,
     )
     session.add(upstream)
-    await session.flush()
-    new_id = upstream.id
-
-    has_default = await _scalar_one(
-        session,
-        select(SpyLookUpstream).where(SpyLookUpstream.is_default == True),
-    ) is not None
-
-    if is_default or not has_default:
-        await session.execute(
-            update(SpyLookUpstream).values(is_default=False, updated_at=datetime.utcnow())
-        )
-        await session.execute(
-            update(SpyLookUpstream).where(SpyLookUpstream.id == new_id).values(
-                is_default=True, updated_at=datetime.utcnow()
-            )
-        )
-
     await session.commit()
-    return new_id
+    await session.refresh(upstream)
+    return upstream.id or 0
 
 
 async def update_upstream(
@@ -166,40 +128,14 @@ async def delete_upstream(session: AsyncSession, upstream_id: int) -> bool:
     upstream = await session.get(SpyLookUpstream, upstream_id)
     if not upstream:
         return False
-    was_default = upstream.is_default
+    refs = await count_upstream_route_refs(session, upstream_id)
+    if refs > 0:
+        bindings = await list_upstream_bindings(session, upstream_id)
+        names = "、".join(
+            f"{item['public_model_name']}/{item['upstream_model']}"
+            for item in bindings
+        )
+        raise ValueError(f"该模型源仍被以下对外模型绑定：{names}，请先在对外模型配置中解除绑定后再删除")
     await session.delete(upstream)
-
-    if was_default:
-        nxt = await _scalar_one(
-            session,
-            select(SpyLookUpstream).order_by(SpyLookUpstream.id.asc()).limit(1),
-        )
-        if nxt:
-            await session.execute(
-                update(SpyLookUpstream).values(is_default=False, updated_at=datetime.utcnow())
-            )
-            await session.execute(
-                update(SpyLookUpstream).where(SpyLookUpstream.id == nxt.id).values(
-                    is_default=True, updated_at=datetime.utcnow()
-                )
-            )
-
-    await session.commit()
-    return True
-
-
-async def set_default_upstream(session: AsyncSession, upstream_id: int) -> bool:
-    upstream = await session.get(SpyLookUpstream, upstream_id)
-    if not upstream or not upstream.enabled:
-        return False
-
-    await session.execute(
-        update(SpyLookUpstream).values(is_default=False, updated_at=datetime.utcnow())
-    )
-    await session.execute(
-        update(SpyLookUpstream).where(SpyLookUpstream.id == upstream_id).values(
-            is_default=True, updated_at=datetime.utcnow()
-        )
-    )
     await session.commit()
     return True

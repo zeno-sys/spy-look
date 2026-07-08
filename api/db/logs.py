@@ -45,6 +45,7 @@ async def log_event(session: AsyncSession, event: dict[str, Any]) -> None:
     log = SpyLookLog(
         path=event.get("path"),
         model=event.get("model"),
+        upstream_model=event.get("upstream_model"),
         status_code=event.get("status_code"),
         latency_ms=event.get("latency_ms"),
         client_ip=event.get("client_ip"),
@@ -108,6 +109,34 @@ async def query_logs(
     if not isinstance(total, int):
         total = int(total)
     return items, total
+
+
+async def list_log_models(
+    session: AsyncSession,
+    *,
+    app_id: str,
+    session_id: str,
+) -> list[str]:
+    aid = str(app_id or "").strip()
+    sid = str(session_id or "").strip()
+    if not aid:
+        raise ValueError("app_id is required")
+    if not sid:
+        raise ValueError("session_id is required")
+
+    stmt = (
+        select(SpyLookLog.model)
+        .where(
+            SpyLookLog.app_id == aid,
+            SpyLookLog.session_id == sid,
+            SpyLookLog.model.isnot(None),
+            SpyLookLog.model != "",
+        )
+        .distinct()
+        .order_by(SpyLookLog.model.asc())
+    )
+    result = await session.execute(stmt)
+    return [str(row[0]) for row in result.all() if row[0]]
 
 
 async def get_log(session: AsyncSession, log_id: int) -> dict[str, Any] | None:

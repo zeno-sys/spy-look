@@ -2,7 +2,7 @@
 
 **个人工具合集** — 常用小工具集中在一个本地服务里，按需选用。
 
-当前已内置 **大模型网关**：OpenAI 兼容代理 + 请求追踪 + 上游 Failover + 模型能力探测。更多工具将陆续加入。
+当前已内置 **大模型网关**：OpenAI 兼容代理 + 请求追踪 + 对外模型路由 + 模型能力探测。更多工具将陆续加入。
 
 ```bash
 cd api
@@ -16,11 +16,11 @@ uv run main.py
 
 ## 工具：大模型网关
 
-把 `/v1/chat/completions` 接到 Spy-Look，立刻获得：按应用/会话分级的请求追踪、完整 request/response 落库、Token 统计、上游 Failover，以及一键模型能力探测——无需额外部署 Grafana / ELK。
+把 `/v1/chat/completions` 接到 Spy-Look，立刻获得：按应用/会话分级的请求追踪、完整 request/response 落库、Token 统计、对外模型抽象与负载均衡，以及一键模型能力探测——无需额外部署 Grafana / ELK。
 
 ### 1. 三级可观测：应用 → 会话 → 请求
 
-每条对外 API Key 绑定唯一 **`app_id`**（标识下游服务）；对话请求可携带 **`session_id`** 区分多路会话。内置控制台按三级钻取，排障时不用在海量日志里盲搜。
+每条对外 API Key 绑定唯一 **`app_id`**（标识下游服务）；对话请求可在请求头携带 **`X-Session-Id`** 区分多路会话。内置控制台按三级钻取，排障时不用在海量日志里盲搜。
 
 | 应用列表 | 会话列表 | 请求日志 |
 |:---:|:---:|:---:|
@@ -31,15 +31,15 @@ uv run main.py
 - **多维筛选**：按 path、model、时间区间、client_ip 等组合查询
 - **流式支持**：SSE 流结束后拼接完整内容写入，与非流式体验一致
 
-### 2. 可视化上游管理 + 自动 Failover
+### 2. 模型源 + 对外模型双层配置
 
-Web 页配置上游地址、API Key、超时与代理；多上游并存，连接失败时按顺序自动切换，收到有效 HTTP 响应（含 4xx/5xx）后不重试，避免重复计费。
+**模型源配置**管理真实 LLM 提供商的连接信息；**对外模型配置**定义客户端可见的模型名，并映射到具体模型源与实际模型。多源绑定时，网关通过 `X-Session-Id` 做一致性哈希路由，同一客户端始终打到同一源；连接失败时在绑定池内 Failover。
 
 ![上游配置](screenshots/upstream-config.png)
 
-- 对外 API Key 与上游 Key 分离管理，Key 服务端自动生成
-- 一键切换「当前对外上游」，保存即生效
-- 查看各上游可用模型列表
+- 对外 API Key 与模型源 Key 分离管理，Key 服务端自动生成
+- `/v1/models` 仅返回对外模型配置，不再暴露上游真实模型列表
+- 支持 1 对多模型源绑定，带会话粘性负载均衡
 
 ### 3. 模型能力一键探测
 
@@ -60,23 +60,23 @@ Web 页配置上游地址、API Key、超时与代理；多上游并存，连接
 
 ### 4. OpenAI 兼容 API，零改造接入
 
-客户端只需把 `base_url` 指向 Spy-Look，其余保持不变：
+客户端只需把 `base_url` 指向 Spy-Look，并使用对外模型配置中的模型名：
 
 ```bash
 curl http://127.0.0.1:8000/v1/chat/completions \
   -H "Authorization: Bearer <your-gateway-key>" \
   -H "Content-Type: application/json" \
+  -H "X-Session-Id: user-42-chat-1" \
   -d '{
     "model": "gpt-4o-mini",
-    "messages": [{"role": "user", "content": "hello"}],
-    "session_id": "user-42-chat-1"
+    "messages": [{"role": "user", "content": "hello"}]
   }'
 ```
 
 | 接口 | 说明 |
 |------|------|
 | `POST /v1/chat/completions` | 对话（流式 / 非流式） |
-| `GET /v1/models` | 模型列表 |
+| `GET /v1/models` | 对外模型列表 |
 | `GET /healthz` | 健康检查 |
 
 控制台专用管理/日志 API 位于 `/gateway/admin/*` 与 `/gateway/logs/*`（**Breaking change**：旧版 `/admin/*`、`/logs/*` 已移除）。
@@ -98,9 +98,11 @@ uv run main.py
 
 浏览器打开 [http://127.0.0.1:8000](http://127.0.0.1:8000)：
 
-1. 首页 → **大模型网关** → **上游配置**，添加上游并创建对外 API Key（填写 `app_id`）
-2. 用 Key 调用 `/v1/chat/completions`
+1. 首页 → **大模型网关** → **模型配置**，添加模型源、创建对外模型映射，并创建对外 API Key（填写 `app_id`）
+2. 用 Key 调用 `/v1/chat/completions`（请求头携带 `X-Session-Id`）
 3. **请求日志** 中按 **应用 → 会话 → 日志** 查看请求详情
+
+> **升级说明**：若从旧版升级，需在「对外模型配置」中手动创建对外模型映射；旧版请求体中的 `session_id` 已改为请求头 `X-Session-Id`。
 
 ### 前端开发（可选）
 
@@ -142,8 +144,8 @@ spy-look/
 
 - 想把常用个人工具（网关、后续更多）收拢到一个本地服务
 - 本地开发 / 小团队：给 LLM 调用加一层网关，顺便看清每次请求的详细信息
-- 多下游服务：用 `app_id` + `session_id` 把日志按业务线、对话隔离
-- 多上游场景：SiliconFlow、ModelScope、自建 vLLM……配好几条，Failover 自动兜底
+- 多下游服务：用 `app_id` + `X-Session-Id` 把日志按业务线、对话隔离
+- 多模型源场景：SiliconFlow、ModelScope、自建 vLLM……配置对外模型映射，带会话粘性负载均衡
 - 接新模型：用能力探测页快速确认 Function Calling / JSON Mode 是否可用
 
 ---

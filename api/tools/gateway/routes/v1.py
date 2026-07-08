@@ -11,24 +11,21 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from db.engine import get_session
-from db.upstreams import list_failover_upstream_rows
+from db.public_models import get_public_model_by_name, list_enabled_routes_for_model, list_public_model_ids
 from dependencies import resolve_gateway_client
 from errors import (
+    model_not_found_error,
+    no_available_route_error,
+    no_public_models_response,
     normalize_upstream_error,
-    openai_error_response,
     upstream_timeout_error,
     upstream_unavailable_error,
 )
 from tools.gateway.services.log_pipeline import schedule_log_event
-from tools.gateway.services.upstream_client import (
-    UpstreamClient,
-    upstream_runtime_from_row,
-    try_upstream_rows,
-)
+from tools.gateway.services.model_router import pick_route_index, resolve_session_id, try_routes_with_sticky_failover
+from tools.gateway.services.upstream_client import UpstreamClient, upstream_runtime_from_row
 
 router = APIRouter(prefix="/v1", tags=["gateway"])
-
-DEFAULT_LOG_SESSION_ID = "default"
 
 
 async def read_request_json(request: Request) -> Any:
@@ -36,22 +33,6 @@ async def read_request_json(request: Request) -> Any:
         return await request.json()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from None
-
-
-def _resolve_session_and_upstream_body(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    raw = body.get("session_id")
-    sid = str(raw).strip() if raw is not None and str(raw).strip() else DEFAULT_LOG_SESSION_ID
-    upstream = {k: v for k, v in body.items() if k != "session_id"}
-    return sid, upstream
-
-
-def no_upstream_response() -> JSONResponse:
-    return openai_error_response(
-        message="No enabled default upstream configured",
-        status_code=503,
-        error_type="upstream_error",
-        code="upstream_not_configured",
-    )
 
 
 def parse_response_json(response: httpx.Response) -> Any:
@@ -74,21 +55,23 @@ async def list_models(
     app_id: str = Depends(resolve_gateway_client),
     session: AsyncSession = Depends(get_session),
 ) -> JSONResponse:
-    rows = await list_failover_upstream_rows(session)
-    if not rows:
-        return no_upstream_response()
+    model_ids = await list_public_model_ids(session)
+    if not model_ids:
+        return no_public_models_response()
 
-    try:
-        upstream_response, _client = await try_upstream_rows(rows, lambda c: c.list_models())
-    except httpx.TimeoutException:
-        return upstream_timeout_error()
-    except httpx.HTTPError:
-        return upstream_unavailable_error()
-
-    payload = parse_response_json(upstream_response)
-    if upstream_response.is_error:
-        return normalize_upstream_error(upstream_response.status_code, payload)
-    return JSONResponse(status_code=upstream_response.status_code, content=payload)
+    payload = {
+        "object": "list",
+        "data": [
+            {
+                "id": name,
+                "object": "model",
+                "created": 0,
+                "owned_by": "spy-look",
+            }
+            for name in model_ids
+        ],
+    }
+    return JSONResponse(status_code=200, content=payload)
 
 
 @router.post("/chat/completions", response_model=None)
@@ -98,45 +81,62 @@ async def create_chat_completions(
     session: AsyncSession = Depends(get_session),
 ) -> JSONResponse | StreamingResponse:
     client_ip = request.client.host if request.client else None
-
-    rows = await list_failover_upstream_rows(session)
-    if not rows:
-        return no_upstream_response()
+    session_id = resolve_session_id(request)
 
     start = time.perf_counter()
     body = await read_request_json(request)
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="JSON body must be an object")
-    session_id, upstream_body = _resolve_session_and_upstream_body(body)
-    model = upstream_body.get("model")
+
+    public_model = body.get("model")
+    if not public_model or not str(public_model).strip():
+        raise HTTPException(status_code=400, detail="model is required")
+
+    public_model = str(public_model).strip()
+    model_row = await get_public_model_by_name(session, public_model)
+    if not model_row or not model_row.enabled:
+        return model_not_found_error(public_model)
+
+    _, routes = await list_enabled_routes_for_model(session, public_model)
+    if not routes:
+        return no_available_route_error()
+
+    upstream_body = copy.deepcopy(body)
     stream = bool(upstream_body.get("stream", False))
+    start_idx = pick_route_index(len(routes), session_id)
 
     if stream:
         client: UpstreamClient | None = None
         upstream_response: httpx.Response | None = None
         stream_iter: AsyncIterator[bytes] | None = None
         last_transport_error: Exception | None = None
+        selected_upstream_model: str | None = None
 
-        for row in rows:
-            cfg = upstream_runtime_from_row(row)
+        for offset in range(len(routes)):
+            route = routes[(start_idx + offset) % len(routes)]
+            cfg = upstream_runtime_from_row(route.upstream_row)
             if not cfg:
                 continue
             client = UpstreamClient(cfg)
+            payload = {**upstream_body, "model": route.upstream_model}
             try:
-                upstream_response, stream_iter = await client.chat_completions_stream(upstream_body)
+                upstream_response, stream_iter = await client.chat_completions_stream(payload)
             except (httpx.TimeoutException, httpx.HTTPError) as exc:
                 await client.close()
                 last_transport_error = exc
                 continue
 
             if upstream_response.is_error:
-                payload = parse_response_json(upstream_response)
-                return normalize_upstream_error(upstream_response.status_code, payload)
+                parsed = parse_response_json(upstream_response)
+                return normalize_upstream_error(upstream_response.status_code, parsed)
+            selected_upstream_model = route.upstream_model
             break
         else:
             if isinstance(last_transport_error, httpx.TimeoutException):
                 return upstream_timeout_error()
             return upstream_unavailable_error()
+
+        assert client is not None and upstream_response is not None and stream_iter is not None
 
         async def wrapped_stream() -> AsyncIterator[bytes]:
             response_chunks: list[str] = []
@@ -150,10 +150,10 @@ async def create_chat_completions(
                 gw_path = "/v1/chat/completions"
                 log_tasks = getattr(request.app.state, "_log_tasks", set())
                 schedule_log_event(
-                    session=session,
                     event=copy.deepcopy({
                         "path": client.logged_upstream_url(gw_path),
-                        "model": model,
+                        "model": public_model,
+                        "upstream_model": selected_upstream_model,
                         "status_code": upstream_response.status_code,
                         "latency_ms": elapsed_ms,
                         "client_ip": client_ip,
@@ -176,13 +176,18 @@ async def create_chat_completions(
         )
 
     try:
-        upstream_response, client = await try_upstream_rows(
-            rows, lambda c: c.chat_completions(upstream_body)
+        upstream_response, client, route = await try_routes_with_sticky_failover(
+            routes,
+            session_id,
+            lambda c, payload: c.chat_completions(payload),
+            upstream_body,
         )
     except httpx.TimeoutException:
         return upstream_timeout_error()
     except httpx.HTTPError:
         return upstream_unavailable_error()
+    except RuntimeError:
+        return no_available_route_error()
 
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     payload = parse_response_json(upstream_response)
@@ -194,10 +199,10 @@ async def create_chat_completions(
 
     log_tasks = getattr(request.app.state, "_log_tasks", set())
     schedule_log_event(
-        session=session,
         event=copy.deepcopy({
             "path": client.logged_upstream_url(gw_path),
-            "model": model,
+            "model": public_model,
+            "upstream_model": route.upstream_model,
             "status_code": upstream_response.status_code,
             "latency_ms": elapsed_ms,
             "client_ip": client_ip,

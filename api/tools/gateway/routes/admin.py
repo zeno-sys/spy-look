@@ -26,16 +26,22 @@ from db.client_keys import (
     update_client_key_app_id,
 )
 from db.engine import get_session
+from db.public_models import (
+    create_public_model,
+    delete_public_model,
+    get_public_model,
+    list_public_models,
+    list_upstream_bindings,
+    update_public_model,
+)
 from db.upstreams import (
     create_upstream,
     delete_upstream,
-    get_default_upstream_row,
     get_upstream,
     get_upstream_runtime,
-    list_failover_upstream_rows,
+    list_enabled_upstream_rows,
     list_upstreams,
     mask_api_key,
-    set_default_upstream,
     update_upstream,
 )
 from tools.gateway.schemas import (
@@ -46,8 +52,8 @@ from tools.gateway.schemas import (
 from tools.gateway.services.capability_probe import probe_model_capabilities
 from tools.gateway.services.token_speed_test import test_token_speed
 from tools.gateway.services.upstream_client import (
-    UpstreamClient,
     UpstreamRuntimeConfig,
+    upstream_auth_headers,
     upstream_runtime_from_row,
 )
 
@@ -65,22 +71,22 @@ async def read_request_json(request: Request) -> Any:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from None
 
 
-async def refresh_upstream_client(app_state: Any, session: AsyncSession) -> None:
-    old = getattr(app_state, "upstream_client", None)
-    row = await get_default_upstream_row(session)
-    cfg = upstream_runtime_from_row(row) if row else None
-    if old is not None:
-        await old.close()
-    app_state.upstream_client = UpstreamClient(cfg) if cfg else None
-
-
 def _upstream_option_public(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
         "name": row.get("name") or f"upstream-{row['id']}",
         "base_url": row.get("base_url"),
-        "is_default": bool(row.get("is_default")),
     }
+
+
+def _route_bindings_summary(routes: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for route in routes:
+        if not route.get("enabled", True):
+            continue
+        upstream_name = route.get("upstream_name") or f"源{route.get('upstream_id')}"
+        parts.append(f"{upstream_name}/{route.get('upstream_model')}")
+    return " + ".join(parts) if parts else "—"
 
 
 def _sort_model_ids(model_ids: list[str]) -> list[str]:
@@ -96,10 +102,7 @@ async def _fetch_models_from_config(cfg: UpstreamRuntimeConfig) -> list[str]:
         ) as client:
             resp = await client.get(
                 "/models",
-                headers={
-                    "Authorization": f"Bearer {cfg.api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=upstream_auth_headers(cfg.api_key),
             )
         if resp.is_error:
             return []
@@ -157,33 +160,81 @@ async def _get_custom_models_cached(uri: str, api_key: str) -> tuple[list[str], 
     return models, False
 
 
-async def _runtime_config_from_test_body(session: AsyncSession, body: dict[str, Any]) -> UpstreamRuntimeConfig:
-    raw_id = body.get("id")
-    if raw_id is not None and str(raw_id).strip() != "":
-        uid = int(raw_id)
-        row = await get_upstream_runtime(session, uid)
+async def _build_upstream_config_for_save(
+    session: AsyncSession,
+    body: dict[str, Any],
+    *,
+    upstream_id: int | None = None,
+) -> UpstreamRuntimeConfig:
+    if upstream_id is not None:
+        row = await get_upstream_runtime(session, upstream_id)
         if not row:
             raise HTTPException(status_code=404, detail="upstream not found")
-        base_url = str(body.get("base_url") or row.get("base_url") or "").strip()
-        api_key_raw = body.get("api_key")
-        if api_key_raw is not None and str(api_key_raw).strip():
-            api_key = str(api_key_raw).strip()
+        base_url = str(body.get("base_url") if "base_url" in body else row.get("base_url") or "").strip()
+        if "api_key" in body and str(body.get("api_key") or "").strip():
+            api_key = str(body.get("api_key") or "").strip()
         else:
             api_key = str(row.get("api_key") or "")
-        trust_env = bool(body.get("trust_env")) if body.get("trust_env") is not None else bool(row.get("trust_env"))
-        timeout_seconds = float(body.get("timeout_seconds")) if body.get("timeout_seconds") is not None else float(row.get("timeout_seconds") or 60.0)
-        return UpstreamRuntimeConfig(base_url=base_url, api_key=api_key, timeout_seconds=timeout_seconds, trust_env=trust_env)
+        trust_env = bool(body.get("trust_env")) if "trust_env" in body else bool(row.get("trust_env"))
+        timeout_seconds = (
+            float(body.get("timeout_seconds"))
+            if body.get("timeout_seconds") is not None
+            else float(row.get("timeout_seconds") or 60.0)
+        )
+    else:
+        base_url = str(body.get("base_url") or "").strip()
+        api_key = str(body.get("api_key") or "").strip()
+        trust_env = bool(body.get("trust_env", False))
+        timeout_seconds = float(body.get("timeout_seconds") or 60.0)
 
-    base_url = str(body.get("base_url") or "").strip()
-    api_key = str(body.get("api_key") or "").strip()
-    if not base_url or not api_key:
-        raise HTTPException(status_code=400, detail="base_url and api_key are required when id is omitted")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="base_url is required")
+
     return UpstreamRuntimeConfig(
         base_url=base_url,
         api_key=api_key,
-        timeout_seconds=float(body.get("timeout_seconds") or 60.0),
-        trust_env=bool(body.get("trust_env", False)),
+        timeout_seconds=timeout_seconds,
+        trust_env=trust_env,
     )
+
+
+async def _runtime_config_from_test_body(session: AsyncSession, body: dict[str, Any]) -> UpstreamRuntimeConfig:
+    raw_id = body.get("id")
+    upstream_id: int | None = None
+    if raw_id is not None and str(raw_id).strip() != "":
+        upstream_id = int(raw_id)
+    return await _build_upstream_config_for_save(session, body, upstream_id=upstream_id)
+
+
+async def _verify_upstream_connectivity(cfg: UpstreamRuntimeConfig) -> None:
+    try:
+        async with httpx.AsyncClient(
+            base_url=cfg.base_url,
+            timeout=cfg.timeout_seconds,
+            trust_env=cfg.trust_env,
+        ) as client:
+            resp = await client.get(
+                "/models",
+                headers=upstream_auth_headers(cfg.api_key),
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=400, detail="连通性测试失败：请求超时") from None
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=400, detail=f"连通性测试失败：{exc}") from exc
+
+    if resp.is_error:
+        detail = f"连通性测试失败：上游返回 HTTP {resp.status_code}"
+        try:
+            payload = resp.json()
+            if isinstance(payload, dict) and payload.get("error"):
+                err = payload["error"]
+                if isinstance(err, dict) and err.get("message"):
+                    detail = f"连通性测试失败：{err['message']}"
+        except ValueError:
+            text = (resp.text or "").strip()
+            if text:
+                detail = f"连通性测试失败：{text[:200]}"
+        raise HTTPException(status_code=400, detail=detail)
 
 
 @router.get("/client-info")
@@ -306,8 +357,10 @@ async def admin_create_upstream(request: Request, session: AsyncSession = Depend
     name = str(body.get("name") or "").strip()
     base_url = str(body.get("base_url") or "").strip()
     api_key = str(body.get("api_key") or "").strip()
-    if not name or not base_url or not api_key:
-        raise HTTPException(status_code=400, detail="name, base_url, api_key are required")
+    if not name or not base_url:
+        raise HTTPException(status_code=400, detail="name, base_url are required")
+    cfg = await _build_upstream_config_for_save(session, body)
+    await _verify_upstream_connectivity(cfg)
     new_id = await create_upstream(
         session,
         name=name,
@@ -316,9 +369,7 @@ async def admin_create_upstream(request: Request, session: AsyncSession = Depend
         trust_env=bool(body.get("trust_env", False)),
         timeout_seconds=float(body.get("timeout_seconds") or 60.0),
         enabled=bool(body.get("enabled", True)),
-        is_default=bool(body.get("is_default", False)),
     )
-    await refresh_upstream_client(request.app.state, session)
     row = await get_upstream(session, new_id)
     return JSONResponse(status_code=201, content=row)
 
@@ -328,6 +379,8 @@ async def admin_patch_upstream(request: Request, upstream_id: int, session: Asyn
     body = await read_request_json(request)
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="JSON body must be an object")
+    cfg = await _build_upstream_config_for_save(session, body, upstream_id=upstream_id)
+    await _verify_upstream_connectivity(cfg)
     ok = await update_upstream(
         session, upstream_id,
         name=body.get("name") if "name" in body else None,
@@ -339,28 +392,119 @@ async def admin_patch_upstream(request: Request, upstream_id: int, session: Asyn
     )
     if not ok:
         raise HTTPException(status_code=404, detail="upstream not found")
-    await refresh_upstream_client(request.app.state, session)
+    _upstream_models_cache.pop(upstream_id, None)
     row = await get_upstream(session, upstream_id)
     return JSONResponse(content=row)
+
+
+@router.get("/upstreams/{upstream_id}/bindings")
+async def admin_list_upstream_bindings(
+    upstream_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    row = await get_upstream(session, upstream_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="upstream not found")
+    items = await list_upstream_bindings(session, upstream_id)
+    return JSONResponse(content={"upstream_id": upstream_id, "items": items})
 
 
 @router.delete("/upstreams/{upstream_id}")
-async def admin_delete_upstream(request: Request, upstream_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
-    ok = await delete_upstream(session, upstream_id)
+async def admin_delete_upstream(upstream_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    try:
+        ok = await delete_upstream(session, upstream_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not ok:
         raise HTTPException(status_code=404, detail="upstream not found")
-    await refresh_upstream_client(request.app.state, session)
     return JSONResponse(content={"ok": True, "deleted_id": upstream_id})
 
 
-@router.post("/upstreams/{upstream_id}/set-default")
-async def admin_set_default_upstream(request: Request, upstream_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
-    ok = await set_default_upstream(session, upstream_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="upstream not found or disabled")
-    await refresh_upstream_client(request.app.state, session)
-    row = await get_upstream(session, upstream_id)
+@router.get("/upstreams/{upstream_id}/models")
+async def admin_list_upstream_models(
+    upstream_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    models, from_cache = await _get_upstream_models_cached(session, upstream_id)
+    return JSONResponse(content={"upstream_id": upstream_id, "models": models, "cached": from_cache})
+
+
+@router.get("/public-models")
+async def admin_list_public_models(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    items = await list_public_models(session)
+    for item in items:
+        item["bindings_summary"] = _route_bindings_summary(item.get("routes") or [])
+    return JSONResponse(content={"items": items})
+
+
+@router.get("/public-models/{model_id}")
+async def admin_get_public_model(model_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    row = await get_public_model(session, model_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="public model not found")
+    row["bindings_summary"] = _route_bindings_summary(row.get("routes") or [])
     return JSONResponse(content=row)
+
+
+@router.post("/public-models")
+async def admin_create_public_model(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    body = await read_request_json(request)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    routes = body.get("routes")
+    if not isinstance(routes, list):
+        raise HTTPException(status_code=400, detail="routes must be an array")
+    try:
+        new_id = await create_public_model(
+            session,
+            name=str(body.get("name") or ""),
+            enabled=bool(body.get("enabled", True)),
+            routes=routes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    row = await get_public_model(session, new_id)
+    assert row is not None
+    row["bindings_summary"] = _route_bindings_summary(row.get("routes") or [])
+    return JSONResponse(status_code=201, content=row)
+
+
+@router.patch("/public-models/{model_id}")
+async def admin_patch_public_model(
+    request: Request,
+    model_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    body = await read_request_json(request)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    routes = body.get("routes") if "routes" in body else None
+    if routes is not None and not isinstance(routes, list):
+        raise HTTPException(status_code=400, detail="routes must be an array")
+    try:
+        ok = await update_public_model(
+            session,
+            model_id,
+            name=body.get("name") if "name" in body else None,
+            enabled=body.get("enabled") if "enabled" in body else None,
+            routes=routes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(status_code=404, detail="public model not found")
+    row = await get_public_model(session, model_id)
+    assert row is not None
+    row["bindings_summary"] = _route_bindings_summary(row.get("routes") or [])
+    return JSONResponse(content=row)
+
+
+@router.delete("/public-models/{model_id}")
+async def admin_delete_public_model(model_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    ok = await delete_public_model(session, model_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="public model not found")
+    return JSONResponse(content={"ok": True, "deleted_id": model_id})
 
 
 @router.post("/upstreams/test")
@@ -377,10 +521,7 @@ async def admin_test_upstream(request: Request, session: AsyncSession = Depends(
         ) as client:
             resp = await client.get(
                 "/models",
-                headers={
-                    "Authorization": f"Bearer {cfg.api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=upstream_auth_headers(cfg.api_key),
             )
     except httpx.TimeoutException:
         return JSONResponse(status_code=200, content={
@@ -410,7 +551,7 @@ async def admin_test_upstream(request: Request, session: AsyncSession = Depends(
 
 @router.get("/model-capability-probe/options")
 async def admin_model_capability_probe_options(session: AsyncSession = Depends(get_session)) -> JSONResponse:
-    rows = await list_failover_upstream_rows(session)
+    rows = await list_enabled_upstream_rows(session)
     upstreams = [_upstream_option_public(row) for row in rows]
     return JSONResponse(content={"upstreams": upstreams})
 
@@ -449,7 +590,7 @@ async def _resolve_probe_credentials(
             raise HTTPException(status_code=400, detail="upstream is disabled")
         uri = str(row.get("base_url") or "").strip()
         api_key = str(row.get("api_key") or "").strip()
-        if not uri or not api_key:
+        if not uri:
             raise HTTPException(status_code=400, detail="incomplete upstream configuration")
         return uri, api_key, str(body.model).strip()
     uri = str(body.uri).strip()
@@ -469,7 +610,7 @@ async def _resolve_speed_test_credentials(
             raise HTTPException(status_code=400, detail="upstream is disabled")
         uri = str(row.get("base_url") or "").strip()
         api_key = str(row.get("api_key") or "").strip()
-        if not uri or not api_key:
+        if not uri:
             raise HTTPException(status_code=400, detail="incomplete upstream configuration")
         return uri, api_key, str(body.model).strip()
     uri = str(body.uri).strip()

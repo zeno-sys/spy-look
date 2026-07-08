@@ -16,6 +16,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from tools.gateway.services.upstream_client import upstream_auth_headers
+
 _THINKING_TAG = re.compile(
     r"(?:<think(?:ing)?>|</think(?:ing)?>|<think>|</think>)",
     re.IGNORECASE,
@@ -82,10 +84,7 @@ def _post_chat(
     api_key: str,
     body: dict[str, Any],
 ) -> tuple[int, dict[str, Any] | None, str | None]:
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
-    }
+    headers = upstream_auth_headers(api_key)
     try:
         resp = client.post(url, headers=headers, json=body)
     except httpx.HTTPError as e:

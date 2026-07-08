@@ -9,11 +9,9 @@ from fastapi.staticfiles import StaticFiles
 
 from config import UI_DIR
 from db.engine import init_db
-from db.upstreams import get_default_upstream_row
 from errors import openai_error_response
 from tools.gateway.router import router as gateway_tool_router
 from tools.video_tools.router import router as video_tools_router
-from tools.gateway.services.upstream_client import UpstreamClient, upstream_runtime_from_row
 
 
 @asynccontextmanager
@@ -24,19 +22,10 @@ async def lifespan(app: FastAPI):
 
     ensure_config()
 
-    from db.engine import async_session_factory, async_engine
-    async with async_session_factory(async_engine) as session:
-        row = await get_default_upstream_row(session)
-        cfg = upstream_runtime_from_row(row) if row else None
-
-    app.state.upstream_client = UpstreamClient(cfg) if cfg else None
     app.state._log_tasks: set[asyncio.Task] = set()
     try:
         yield
     finally:
-        client = getattr(app.state, "upstream_client", None)
-        if client is not None:
-            await client.close()
         tasks = getattr(app.state, "_log_tasks", set())
         if tasks:
             try:
