@@ -15,7 +15,7 @@
       </div>
       <el-menu
         :default-active="activeMenu"
-        :default-openeds="['gateway', 'video-tools']"
+        :default-openeds="['gateway', 'video-tools', 'doc-tools']"
         router
         class="sidebar-menu"
       >

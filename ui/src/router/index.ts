@@ -8,6 +8,8 @@ import TokenSpeedTestView from '../views/gateway/TokenSpeedTestView.vue'
 import VramCalculatorView from '../views/gateway/VramCalculatorView.vue'
 import VideoToolsConfigView from '../views/video_tools/VideoToolsConfigView.vue'
 import VoiceToTextView from '../views/video_tools/VoiceToTextView.vue'
+import MdToDocxView from '../views/doc_tools/MdToDocxView.vue'
+import MdHeadingNumberingView from '../views/doc_tools/MdHeadingNumberingView.vue'
 
 const routes = [
   {
@@ -25,6 +27,13 @@ const routes = [
       { path: 'video-tools', redirect: '/video-tools/config' },
       { path: 'video-tools/config', name: 'videoToolsConfig', component: VideoToolsConfigView },
       { path: 'video-tools/voice-to-text', name: 'videoToolsVoiceToText', component: VoiceToTextView },
+      { path: 'doc-tools', redirect: '/doc-tools/md-to-docx' },
+      { path: 'doc-tools/md-to-docx', name: 'docToolsMdToDocx', component: MdToDocxView },
+      {
+        path: 'doc-tools/md-heading-numbering',
+        name: 'docToolsMdHeadingNumbering',
+        component: MdHeadingNumberingView,
+      },
     ],
   },
 ]

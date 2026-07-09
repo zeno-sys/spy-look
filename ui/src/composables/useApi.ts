@@ -50,6 +50,53 @@ export async function apiDelete<T = any>(path: string): Promise<T> {
   return res.json()
 }
 
+export interface DownloadResult {
+  blob: Blob
+  filename: string
+}
+
+function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null
+  const utf8 = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header)
+  if (utf8?.[1]) {
+    try {
+      return decodeURIComponent(utf8[1].trim().replace(/^"|"$/g, ''))
+    } catch {
+      return utf8[1].trim().replace(/^"|"$/g, '')
+    }
+  }
+  const plain = /filename\s*=\s*("?)([^";]+)\1/i.exec(header)
+  return plain?.[2]?.trim() || null
+}
+
+async function readErrorMessage(res: Response): Promise<string> {
+  const err = await res.json().catch(() => ({ detail: res.statusText }))
+  if (typeof err.detail === 'string') return err.detail
+  if (err.error?.message) return String(err.error.message)
+  return JSON.stringify(err.detail ?? err)
+}
+
+/** POST 并下载二进制响应（如 DOCX） */
+export async function apiDownloadPost(
+  path: string,
+  body: FormData | object,
+  fallbackFilename = 'download.bin',
+): Promise<DownloadResult> {
+  const isFormData = body instanceof FormData
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
+    body: isFormData ? body : JSON.stringify(body),
+  })
+  if (!res.ok) {
+    throw new Error(await readErrorMessage(res))
+  }
+  const blob = await res.blob()
+  const filename =
+    filenameFromDisposition(res.headers.get('Content-Disposition')) || fallbackFilename
+  return { blob, filename }
+}
+
 export type SseHandler = (event: string, data: Record<string, unknown>) => void
 
 export async function apiStreamPost(

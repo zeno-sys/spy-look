@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from config import UI_DIR
 from db.engine import init_db
 from errors import openai_error_response
+from tools.doc_tools.router import router as doc_tools_router
 from tools.gateway.router import router as gateway_tool_router
 from tools.video_tools.router import router as video_tools_router
 
@@ -44,6 +45,7 @@ if UI_DIR.exists():
 
 app.include_router(gateway_tool_router)
 app.include_router(video_tools_router)
+app.include_router(doc_tools_router)
 
 
 @app.get("/healthz")

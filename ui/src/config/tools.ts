@@ -55,4 +55,20 @@ export const tools: ToolDefinition[] = [
       { path: '/video-tools/voice-to-text', title: '视频转文字' },
     ],
   },
+  {
+    id: 'doc-tools',
+    title: '文档工具',
+    description: '文档处理：Markdown 转 Word、标题自动编号等。',
+    icon: 'Document',
+    accent: {
+      gradient: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+      surface: 'linear-gradient(160deg, #f0fdfa 0%, #ccfbf1 100%)',
+      iconColor: '#0f766e',
+    },
+    homePath: '/doc-tools/md-to-docx',
+    menuItems: [
+      { path: '/doc-tools/md-to-docx', title: 'MD 转 DOCX' },
+      { path: '/doc-tools/md-heading-numbering', title: 'MD 标题编号' },
+    ],
+  },
 ]
