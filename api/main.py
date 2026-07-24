@@ -12,6 +12,7 @@ from db.engine import init_db
 from errors import openai_error_response
 from tools.doc_tools.router import router as doc_tools_router
 from tools.gateway.router import router as gateway_tool_router
+from tools.settings.router import router as settings_router
 from tools.video_tools.router import router as video_tools_router
 
 
@@ -19,9 +20,11 @@ from tools.video_tools.router import router as video_tools_router
 async def lifespan(app: FastAPI):
     await init_db()
 
+    from tools.settings.services.config_loader import ensure_config as ensure_settings_config
     from tools.video_tools.services.config_loader import ensure_config
 
     ensure_config()
+    ensure_settings_config()
 
     app.state._log_tasks: set[asyncio.Task] = set()
     try:
@@ -46,6 +49,7 @@ if UI_DIR.exists():
 app.include_router(gateway_tool_router)
 app.include_router(video_tools_router)
 app.include_router(doc_tools_router)
+app.include_router(settings_router)
 
 
 @app.get("/healthz")

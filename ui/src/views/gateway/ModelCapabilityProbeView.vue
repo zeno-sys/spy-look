@@ -1,186 +1,506 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <div><h3>大模型网关 · 模型能力测试</h3></div>
+      <div><h3>大模型网关 · 能力测试</h3></div>
     </div>
 
     <div class="page-body">
-      <el-card class="section-card">
-        <template #header><span>探测配置</span></template>
-        <el-alert type="warning" :closable="false" show-icon style="margin-bottom:12px"
-          title="将向上游发起多轮 HTTP 请求，可能消耗配额；单次探测通常需数分钟。" />
+      <el-tabs v-model="activeTab" class="probe-tabs">
+        <!-- ========== 大语言模型能力测试 ========== -->
+        <el-tab-pane label="大语言模型能力测试" name="llm">
+          <el-card class="section-card">
+            <template #header><span>探测配置</span></template>
+            <el-alert type="warning" :closable="false" show-icon style="margin-bottom:12px"
+              title="将向上游发起多轮 HTTP 请求，可能消耗配额；单次探测通常需数分钟。" />
 
-        <el-radio-group v-model="mode" @change="onModeChange">
-          <el-radio-button value="upstream">选择上游</el-radio-button>
-          <el-radio-button value="custom">自定义连接</el-radio-button>
-        </el-radio-group>
+            <el-radio-group v-model="mode" @change="onModeChange">
+              <el-radio-button value="upstream">选择上游</el-radio-button>
+              <el-radio-button value="custom">自定义连接</el-radio-button>
+            </el-radio-group>
 
-        <div style="margin-top:16px">
-          <!-- Upstream Mode -->
-          <el-row v-if="mode === 'upstream'" :gutter="12">
-            <el-col :span="12">
-              <el-form-item label="上游">
-                <el-select v-model="selectedUpstreamId" @change="onUpstreamChange" style="width:100%">
-                  <el-option v-for="o in upstreamOptions" :key="o.id" :label="o.name + ' (' + o.base_url + ')'" :value="o.id" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="模型">
-                <el-select v-model="selectedModel" filterable :disabled="!selectedUpstreamId" style="width:100%" placeholder="请先选择上游">
-                  <el-option v-for="m in upstreamModels" :key="m" :label="m" :value="m" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-          </el-row>
+            <div style="margin-top:16px">
+              <el-row v-if="mode === 'upstream'" :gutter="12">
+                <el-col :span="12">
+                  <el-form-item label="上游">
+                    <el-select v-model="selectedUpstreamId" @change="onUpstreamChange" style="width:100%">
+                      <el-option v-for="o in upstreamOptions" :key="o.id" :label="o.name + ' (' + o.base_url + ')'" :value="o.id" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="模型">
+                    <el-select v-model="selectedModel" filterable :disabled="!selectedUpstreamId" style="width:100%" placeholder="请先选择上游">
+                      <el-option v-for="m in upstreamModels" :key="m" :label="m" :value="m" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
 
-          <!-- Custom Mode -->
-          <template v-if="mode === 'custom'">
-            <el-row :gutter="12">
-              <el-col :span="12">
-                <el-form-item label="API 地址 (uri)">
-                  <el-input v-model="customUri" placeholder="https://api.example.com/v1" @input="onCustomCredentialsChange" />
+              <template v-if="mode === 'custom'">
+                <el-row :gutter="12">
+                  <el-col :span="12">
+                    <el-form-item label="API 地址 (uri)">
+                      <el-input v-model="customUri" placeholder="https://api.example.com/v1" @input="onCustomCredentialsChange" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item label="API Key">
+                      <el-input v-model="customApiKey" type="password" show-password placeholder="sk-..." @input="onCustomCredentialsChange" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-form-item label="模型">
+                  <el-select v-model="selectedModel" filterable :disabled="!customModels.length" style="width:100%" placeholder="请先填写 API 地址与 Key">
+                    <el-option v-for="m in customModels" :key="m" :label="m" :value="m" />
+                  </el-select>
                 </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="API Key">
-                  <el-input v-model="customApiKey" type="password" show-password placeholder="sk-..." @input="onCustomCredentialsChange" />
-                </el-form-item>
+              </template>
+
+              <el-button type="primary" :loading="probing" :disabled="!selectedModel" @click="runProbe" style="margin-top:12px">
+                {{ probing ? '探测中...' : '开始探测' }}
+              </el-button>
+            </div>
+          </el-card>
+
+          <el-card v-if="report" class="section-card probe-report" style="margin-top:16px">
+            <template #header>
+              <div class="card-header">
+                <span>探测报告</span>
+                <el-tag :type="allPassed ? 'success' : 'warning'" size="large">{{ summaryText }}</el-tag>
+              </div>
+            </template>
+
+            <el-descriptions :column="2" border size="small" class="probe-meta">
+              <el-descriptions-item label="服务地址">{{ report.uri }}</el-descriptions-item>
+              <el-descriptions-item label="请求端点">{{ report.endpoint }}</el-descriptions-item>
+              <el-descriptions-item label="模型名称">{{ report.model }}</el-descriptions-item>
+              <el-descriptions-item v-if="report.total_elapsed_ms" label="总耗时">
+                {{ (report.total_elapsed_ms / 1000).toFixed(2) }} s
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <el-row :gutter="12" class="probe-summary">
+              <el-col v-for="cap in capabilities" :key="cap.key" :span="6">
+                <div class="probe-stat" :class="capStatClass(cap)">
+                  <div class="probe-stat__title">{{ cap.title }}</div>
+                  <div class="probe-stat__status">{{ capStatusLabel(cap) }}</div>
+                </div>
               </el-col>
             </el-row>
-            <el-form-item label="模型">
-              <el-select v-model="selectedModel" filterable :disabled="!customModels.length" style="width:100%" placeholder="请先填写 API 地址与 Key">
-                <el-option v-for="m in customModels" :key="m" :label="m" :value="m" />
-              </el-select>
-            </el-form-item>
-          </template>
 
-          <el-button type="primary" :loading="probing" :disabled="!selectedModel" @click="runProbe" style="margin-top:12px">
-            {{ probing ? '探测中...' : '开始探测' }}
-          </el-button>
-        </div>
-      </el-card>
+            <el-row :gutter="12" class="probe-cards">
+              <el-col v-for="cap in capabilities" :key="cap.key" :span="12">
+                <el-card shadow="hover" class="cap-card" :class="capCardClass(cap)">
+                  <template #header>
+                    <div class="card-header">
+                      <span>{{ cap.title }}</span>
+                      <el-tag :type="capTagType(cap)" size="small">{{ capStatusLabel(cap) }}</el-tag>
+                    </div>
+                  </template>
 
-      <!-- Report -->
-      <el-card v-if="report" class="section-card probe-report" style="margin-top:16px">
-        <template #header>
-          <div class="card-header">
-            <span>探测报告</span>
-            <el-tag :type="allPassed ? 'success' : 'warning'" size="large">{{ summaryText }}</el-tag>
-          </div>
-        </template>
+                  <p class="cap-desc">{{ cap.desc }}</p>
 
-        <el-descriptions :column="2" border size="small" class="probe-meta">
-          <el-descriptions-item label="服务地址">{{ report.uri }}</el-descriptions-item>
-          <el-descriptions-item label="请求端点">{{ report.endpoint }}</el-descriptions-item>
-          <el-descriptions-item label="模型名称">{{ report.model }}</el-descriptions-item>
-          <el-descriptions-item v-if="report.total_elapsed_ms" label="总耗时">
-            {{ (report.total_elapsed_ms / 1000).toFixed(2) }} s
-          </el-descriptions-item>
-        </el-descriptions>
+                  <el-alert
+                    v-if="cap.skipped"
+                    type="info"
+                    :closable="false"
+                    show-icon
+                    title="已跳过"
+                    :description="formatCapabilityDetail(cap.key, cap.item)"
+                  />
 
-        <el-row :gutter="12" class="probe-summary">
-          <el-col v-for="cap in capabilities" :key="cap.key" :span="6">
-            <div class="probe-stat" :class="capStatClass(cap)">
-              <div class="probe-stat__title">{{ cap.title }}</div>
-              <div class="probe-stat__status">{{ capStatusLabel(cap) }}</div>
-            </div>
-          </el-col>
-        </el-row>
+                  <el-alert
+                    v-else-if="cap.item.error"
+                    type="error"
+                    :closable="false"
+                    show-icon
+                    title="请求失败"
+                  >
+                    <pre class="cap-error">{{ formatErrorText(cap.item.error) }}</pre>
+                  </el-alert>
 
-        <el-row :gutter="12" class="probe-cards">
-          <el-col v-for="cap in capabilities" :key="cap.key" :span="12">
-            <el-card shadow="hover" class="cap-card" :class="capCardClass(cap)">
+                  <template v-else>
+                    <div class="cap-result" :class="cap.item.supported ? 'cap-result--ok' : 'cap-result--fail'">
+                      <div class="cap-result__label">探测结论</div>
+                      <div class="cap-result__text">{{ formatCapabilityDetail(cap.key, cap.item) }}</div>
+                    </div>
+
+                    <el-descriptions
+                      v-if="cap.key === 'json_mode' && cap.item.parsed"
+                      :column="2"
+                      border
+                      size="small"
+                      class="cap-parsed"
+                    >
+                      <el-descriptions-item label="姓名">{{ cap.item.parsed.name }}</el-descriptions-item>
+                      <el-descriptions-item label="年龄">{{ cap.item.parsed.age }}</el-descriptions-item>
+                      <el-descriptions-item label="城市">{{ cap.item.parsed.city }}</el-descriptions-item>
+                      <el-descriptions-item label="爱好">{{ (cap.item.parsed.hobbies || []).join('、') }}</el-descriptions-item>
+                    </el-descriptions>
+
+                    <div v-if="cap.item.content_preview" class="cap-preview">
+                      <div class="cap-preview__label">响应预览</div>
+                      <pre class="cap-preview__text">{{ cap.item.content_preview }}</pre>
+                    </div>
+                  </template>
+
+                  <div v-if="capMetaTags(cap).length" class="cap-tags">
+                    <el-tag
+                      v-for="tag in capMetaTags(cap)"
+                      :key="tag.label"
+                      size="small"
+                      :type="tag.type || 'info'"
+                    >
+                      {{ tag.label }}
+                    </el-tag>
+                  </div>
+                </el-card>
+              </el-col>
+            </el-row>
+
+            <el-card v-if="report.thinking" shadow="never" class="thinking-card">
               <template #header>
                 <div class="card-header">
-                  <span>{{ cap.title }}</span>
-                  <el-tag :type="capTagType(cap)" size="small">{{ capStatusLabel(cap) }}</el-tag>
+                  <span>思考模式详情</span>
+                  <el-tag :type="report.thinking.supported ? 'success' : 'info'" size="small">
+                    {{ report.thinking.mode_label }}
+                  </el-tag>
                 </div>
               </template>
 
-              <p class="cap-desc">{{ cap.desc }}</p>
+              <p class="thinking-conclusion">{{ report.thinking.detail }}</p>
 
-              <el-alert
-                v-if="cap.skipped"
-                type="info"
-                :closable="false"
-                show-icon
-                title="已跳过"
-                :description="formatCapabilityDetail(cap.key, cap.item)"
-              />
-
-              <el-alert
-                v-else-if="cap.item.error"
-                type="error"
-                :closable="false"
-                show-icon
-                title="请求失败"
-              >
-                <pre class="cap-error">{{ formatErrorText(cap.item.error) }}</pre>
-              </el-alert>
-
-              <template v-else>
-                <div class="cap-result" :class="cap.item.supported ? 'cap-result--ok' : 'cap-result--fail'">
-                  <div class="cap-result__label">探测结论</div>
-                  <div class="cap-result__text">{{ formatCapabilityDetail(cap.key, cap.item) }}</div>
-                </div>
-
-                <el-descriptions
-                  v-if="cap.key === 'json_mode' && cap.item.parsed"
-                  :column="2"
-                  border
-                  size="small"
-                  class="cap-parsed"
-                >
-                  <el-descriptions-item label="姓名">{{ cap.item.parsed.name }}</el-descriptions-item>
-                  <el-descriptions-item label="年龄">{{ cap.item.parsed.age }}</el-descriptions-item>
-                  <el-descriptions-item label="城市">{{ cap.item.parsed.city }}</el-descriptions-item>
-                  <el-descriptions-item label="爱好">{{ (cap.item.parsed.hobbies || []).join('、') }}</el-descriptions-item>
-                </el-descriptions>
-
-                <div v-if="cap.item.content_preview" class="cap-preview">
-                  <div class="cap-preview__label">响应预览</div>
-                  <pre class="cap-preview__text">{{ cap.item.content_preview }}</pre>
-                </div>
-              </template>
-
-              <div v-if="capMetaTags(cap).length" class="cap-tags">
-                <el-tag
-                  v-for="tag in capMetaTags(cap)"
-                  :key="tag.label"
-                  size="small"
-                  :type="tag.type || 'info'"
-                >
-                  {{ tag.label }}
-                </el-tag>
-              </div>
+              <el-table :data="thinkingProbeRows" size="small" border class="thinking-table">
+                <el-table-column prop="label" label="探测场景" width="140" />
+                <el-table-column prop="thinking" label="思考内容" width="120">
+                  <template #default="{ row }">
+                    <el-tag :type="row.thinking === '有思考' ? 'warning' : 'info'" size="small">{{ row.thinking }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="signal" label="检测说明" min-width="200" show-overflow-tooltip />
+              </el-table>
             </el-card>
-          </el-col>
-        </el-row>
+          </el-card>
+        </el-tab-pane>
 
-        <el-card v-if="report.thinking" shadow="never" class="thinking-card">
-          <template #header>
-            <div class="card-header">
-              <span>思考模式详情</span>
-              <el-tag :type="report.thinking.supported ? 'success' : 'info'" size="small">
-                {{ report.thinking.mode_label }}
-              </el-tag>
+        <!-- ========== 嵌入模型能力测试 ========== -->
+        <el-tab-pane label="嵌入模型能力测试" name="embedding">
+          <el-card class="section-card">
+            <template #header><span>测试配置</span></template>
+            <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+              title="将调用上游 /embeddings 接口对两段文本生成向量并计算余弦相似度。" />
+
+            <el-radio-group v-model="embMode" @change="onEmbModeChange">
+              <el-radio-button value="upstream">选择上游</el-radio-button>
+              <el-radio-button value="custom">自定义连接</el-radio-button>
+            </el-radio-group>
+
+            <div style="margin-top:16px">
+              <el-row v-if="embMode === 'upstream'" :gutter="12">
+                <el-col :span="12">
+                  <el-form-item label="上游">
+                    <el-select v-model="embUpstreamId" @change="onEmbUpstreamChange" style="width:100%">
+                      <el-option v-for="o in upstreamOptions" :key="o.id" :label="o.name + ' (' + o.base_url + ')'" :value="o.id" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="模型">
+                    <el-select v-model="embModel" filterable :disabled="!embUpstreamId" style="width:100%" placeholder="请先选择上游">
+                      <el-option v-for="m in embUpstreamModels" :key="m" :label="m" :value="m" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+
+              <template v-if="embMode === 'custom'">
+                <el-row :gutter="12">
+                  <el-col :span="12">
+                    <el-form-item label="API 地址 (uri)">
+                      <el-input v-model="embCustomUri" placeholder="https://api.example.com/v1" @input="onEmbCustomCredentialsChange" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item label="API Key">
+                      <el-input v-model="embCustomApiKey" type="password" show-password placeholder="sk-..." @input="onEmbCustomCredentialsChange" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-form-item label="模型">
+                  <el-select v-model="embModel" filterable :disabled="!embCustomModels.length" style="width:100%" placeholder="请先填写 API 地址与 Key">
+                    <el-option v-for="m in embCustomModels" :key="m" :label="m" :value="m" />
+                  </el-select>
+                </el-form-item>
+              </template>
+
+              <el-row :gutter="12" style="margin-top:8px">
+                <el-col :span="12">
+                  <el-form-item label="文本 A">
+                    <el-input
+                      v-model="embTextA"
+                      type="textarea"
+                      :rows="4"
+                      placeholder="请输入第一段文本"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="文本 B">
+                    <el-input
+                      v-model="embTextB"
+                      type="textarea"
+                      :rows="4"
+                      placeholder="请输入第二段文本"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+
+              <div class="probe-actions">
+                <el-button :loading="embGenerating" @click="generateEmbeddingTexts">
+                  {{ embGenerating ? '生成中...' : '一键生成测试文本' }}
+                </el-button>
+                <el-button
+                  type="primary"
+                  :loading="embProbing"
+                  :disabled="!canRunEmbeddingProbe"
+                  @click="runEmbeddingProbe"
+                >
+                  {{ embProbing ? '测试中...' : '开始测试' }}
+                </el-button>
+              </div>
             </div>
-          </template>
+          </el-card>
+        </el-tab-pane>
 
-          <p class="thinking-conclusion">{{ report.thinking.detail }}</p>
+        <!-- ========== 重排序模型能力测试 ========== -->
+        <el-tab-pane label="重排序模型能力测试" name="rerank">
+          <el-card class="section-card">
+            <template #header><span>测试配置</span></template>
+            <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+              title="将调用上游 /rerank 接口，对查询与多条候选结果进行重排序。" />
 
-          <el-table :data="thinkingProbeRows" size="small" border class="thinking-table">
-            <el-table-column prop="label" label="探测场景" width="140" />
-            <el-table-column prop="thinking" label="思考内容" width="120">
+            <el-radio-group v-model="rrMode" @change="onRrModeChange">
+              <el-radio-button value="upstream">选择上游</el-radio-button>
+              <el-radio-button value="custom">自定义连接</el-radio-button>
+            </el-radio-group>
+
+            <div style="margin-top:16px">
+              <el-row v-if="rrMode === 'upstream'" :gutter="12">
+                <el-col :span="12">
+                  <el-form-item label="上游">
+                    <el-select v-model="rrUpstreamId" @change="onRrUpstreamChange" style="width:100%">
+                      <el-option v-for="o in upstreamOptions" :key="o.id" :label="o.name + ' (' + o.base_url + ')'" :value="o.id" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="模型">
+                    <el-select v-model="rrModel" filterable :disabled="!rrUpstreamId" style="width:100%" placeholder="请先选择上游">
+                      <el-option v-for="m in rrUpstreamModels" :key="m" :label="m" :value="m" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+
+              <template v-if="rrMode === 'custom'">
+                <el-row :gutter="12">
+                  <el-col :span="12">
+                    <el-form-item label="API 地址 (uri)">
+                      <el-input v-model="rrCustomUri" placeholder="https://api.example.com/v1" @input="onRrCustomCredentialsChange" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item label="API Key">
+                      <el-input v-model="rrCustomApiKey" type="password" show-password placeholder="sk-..." @input="onRrCustomCredentialsChange" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-form-item label="模型">
+                  <el-select v-model="rrModel" filterable :disabled="!rrCustomModels.length" style="width:100%" placeholder="请先填写 API 地址与 Key">
+                    <el-option v-for="m in rrCustomModels" :key="m" :label="m" :value="m" />
+                  </el-select>
+                </el-form-item>
+              </template>
+
+              <el-form-item label="查询 (query)" style="margin-top:8px">
+                <el-input
+                  v-model="rrQuery"
+                  type="textarea"
+                  :rows="3"
+                  placeholder="请输入查询文本"
+                />
+              </el-form-item>
+
+              <div class="rr-docs-header">
+                <span>候选结果 (documents)</span>
+                <el-button type="primary" link @click="addRrDocument">添加结果</el-button>
+              </div>
+              <div v-for="(doc, idx) in rrDocuments" :key="idx" class="rr-doc-row">
+                <el-input
+                  v-model="rrDocuments[idx]"
+                  type="textarea"
+                  :rows="2"
+                  :placeholder="`结果 ${idx + 1}`"
+                />
+                <el-button
+                  type="danger"
+                  link
+                  :disabled="rrDocuments.length <= 2"
+                  @click="removeRrDocument(idx)"
+                >
+                  删除
+                </el-button>
+              </div>
+
+              <div class="probe-actions">
+                <el-button :loading="rrGenerating" @click="generateRerankTexts">
+                  {{ rrGenerating ? '生成中...' : '一键生成测试文本' }}
+                </el-button>
+                <el-button
+                  type="primary"
+                  :loading="rrProbing"
+                  :disabled="!canRunRerankProbe"
+                  @click="runRerankProbe"
+                >
+                  {{ rrProbing ? '测试中...' : '开始测试' }}
+                </el-button>
+              </div>
+            </div>
+          </el-card>
+        </el-tab-pane>
+      </el-tabs>
+
+      <el-dialog
+        v-model="embReportVisible"
+        title="嵌入模型测试报告"
+        width="640px"
+        destroy-on-close
+        center
+        class="emb-report-dialog"
+      >
+        <template v-if="embReport">
+          <div class="card-header" style="margin-bottom:16px">
+            <span>测试结果</span>
+            <el-tag :type="embReport.supported ? 'success' : 'danger'" size="large">
+              {{ embReport.supported ? '成功' : '失败' }}
+            </el-tag>
+          </div>
+
+          <el-descriptions :column="2" border size="small" class="probe-meta">
+            <el-descriptions-item label="服务地址">{{ embReport.uri }}</el-descriptions-item>
+            <el-descriptions-item label="请求端点">{{ embReport.endpoint }}</el-descriptions-item>
+            <el-descriptions-item label="模型名称">{{ embReport.model }}</el-descriptions-item>
+            <el-descriptions-item v-if="embReport.dimensions" label="向量维度">{{ embReport.dimensions }}</el-descriptions-item>
+            <el-descriptions-item v-if="embReport.total_elapsed_ms" label="总耗时">
+              {{ (embReport.total_elapsed_ms / 1000).toFixed(2) }} s
+            </el-descriptions-item>
+            <el-descriptions-item v-if="embReport.status_code" label="HTTP 状态">{{ embReport.status_code }}</el-descriptions-item>
+          </el-descriptions>
+
+          <div
+            v-if="embReport.supported && embReport.cosine_similarity != null"
+            class="emb-similarity"
+          >
+            <div class="emb-similarity__label">余弦相似度</div>
+            <div class="emb-similarity__value">{{ formatSimilarity(embReport.cosine_similarity) }}</div>
+            <div class="emb-similarity__raw">原始值：{{ embReport.cosine_similarity }}</div>
+          </div>
+
+          <el-alert
+            v-else-if="embReport.error"
+            type="error"
+            :closable="false"
+            show-icon
+            :title="embReport.detail || '测试失败'"
+            style="margin-top:12px"
+          >
+            <pre class="cap-error">{{ formatErrorText(embReport.error) }}</pre>
+          </el-alert>
+
+          <el-alert
+            v-else-if="embReport.detail"
+            type="info"
+            :closable="false"
+            show-icon
+            :title="embReport.detail"
+            style="margin-top:12px"
+          />
+        </template>
+        <template #footer>
+          <el-button type="primary" @click="embReportVisible = false">关闭</el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog
+        v-model="rrReportVisible"
+        title="重排序模型测试报告"
+        width="760px"
+        destroy-on-close
+        center
+      >
+        <template v-if="rrReport">
+          <div class="card-header" style="margin-bottom:16px">
+            <span>测试结果</span>
+            <el-tag :type="rrReport.supported ? 'success' : 'danger'" size="large">
+              {{ rrReport.supported ? '成功' : '失败' }}
+            </el-tag>
+          </div>
+
+          <el-descriptions :column="2" border size="small" class="probe-meta">
+            <el-descriptions-item label="服务地址">{{ rrReport.uri }}</el-descriptions-item>
+            <el-descriptions-item label="请求端点">{{ rrReport.endpoint }}</el-descriptions-item>
+            <el-descriptions-item label="模型名称">{{ rrReport.model }}</el-descriptions-item>
+            <el-descriptions-item v-if="rrReport.document_count" label="候选数量">{{ rrReport.document_count }}</el-descriptions-item>
+            <el-descriptions-item v-if="rrReport.total_elapsed_ms" label="总耗时">
+              {{ (rrReport.total_elapsed_ms / 1000).toFixed(2) }} s
+            </el-descriptions-item>
+            <el-descriptions-item v-if="rrReport.status_code" label="HTTP 状态">{{ rrReport.status_code }}</el-descriptions-item>
+            <el-descriptions-item label="查询" :span="2">{{ rrReport.query }}</el-descriptions-item>
+          </el-descriptions>
+
+          <el-table
+            v-if="rrReport.supported && rrReport.results?.length"
+            :data="rrReport.results"
+            size="small"
+            border
+            style="margin-top:12px"
+          >
+            <el-table-column prop="rank" label="排序" width="70" />
+            <el-table-column prop="index" label="原索引" width="80" />
+            <el-table-column label="相关度" width="120">
               <template #default="{ row }">
-                <el-tag :type="row.thinking === '有思考' ? 'warning' : 'info'" size="small">{{ row.thinking }}</el-tag>
+                {{ formatSimilarity(row.relevance_score) }}
+                <div class="rr-score-raw">{{ row.relevance_score }}</div>
               </template>
             </el-table-column>
-            <el-table-column prop="signal" label="检测说明" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="document" label="文档内容" min-width="280" show-overflow-tooltip />
           </el-table>
-        </el-card>
-      </el-card>
+
+          <el-alert
+            v-else-if="rrReport.error"
+            type="error"
+            :closable="false"
+            show-icon
+            :title="rrReport.detail || '测试失败'"
+            style="margin-top:12px"
+          >
+            <pre class="cap-error">{{ formatErrorText(rrReport.error) }}</pre>
+          </el-alert>
+
+          <el-alert
+            v-else-if="rrReport.detail"
+            type="info"
+            :closable="false"
+            show-icon
+            :title="rrReport.detail"
+            style="margin-top:12px"
+          />
+        </template>
+        <template #footer>
+          <el-button type="primary" @click="rrReportVisible = false">关闭</el-button>
+        </template>
+      </el-dialog>
     </div>
   </div>
 </template>
@@ -190,6 +510,9 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiGet, apiPost } from '../../composables/useApi'
 
+const activeTab = ref<'llm' | 'embedding' | 'rerank'>('llm')
+
+// ---- LLM probe state ----
 const mode = ref<'upstream' | 'custom'>('upstream')
 const selectedUpstreamId = ref(0)
 const selectedModel = ref('')
@@ -202,6 +525,50 @@ const upstreamOptions = ref<any[]>([])
 const upstreamModels = ref<string[]>([])
 const customModels = ref<string[]>([])
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// ---- Embedding probe state (independent) ----
+const embMode = ref<'upstream' | 'custom'>('upstream')
+const embUpstreamId = ref(0)
+const embModel = ref('')
+const embCustomUri = ref('')
+const embCustomApiKey = ref('')
+const embTextA = ref('')
+const embTextB = ref('')
+const embProbing = ref(false)
+const embGenerating = ref(false)
+const embReport = ref<any>(null)
+const embReportVisible = ref(false)
+const embUpstreamModels = ref<string[]>([])
+const embCustomModels = ref<string[]>([])
+let embDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// ---- Rerank probe state (independent) ----
+const rrMode = ref<'upstream' | 'custom'>('upstream')
+const rrUpstreamId = ref(0)
+const rrModel = ref('')
+const rrCustomUri = ref('')
+const rrCustomApiKey = ref('')
+const rrQuery = ref('')
+const rrDocuments = ref<string[]>(['', ''])
+const rrProbing = ref(false)
+const rrGenerating = ref(false)
+const rrReport = ref<any>(null)
+const rrReportVisible = ref(false)
+const rrUpstreamModels = ref<string[]>([])
+const rrCustomModels = ref<string[]>([])
+let rrDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+const canRunEmbeddingProbe = computed(() =>
+  !!embModel.value
+  && !!embTextA.value.trim()
+  && !!embTextB.value.trim(),
+)
+
+const canRunRerankProbe = computed(() =>
+  !!rrModel.value
+  && !!rrQuery.value.trim()
+  && rrDocuments.value.filter(d => d.trim()).length >= 2,
+)
 
 const capabilities = computed(() => {
   if (!report.value) return []
@@ -248,6 +615,12 @@ function formatErrorText(error: string): string {
   } catch {
     return truncateText(text, 600)
   }
+}
+
+function formatSimilarity(value: number): string {
+  const n = Number(value)
+  if (Number.isNaN(n)) return '-'
+  return `${(n * 100).toFixed(2)}%`
 }
 
 function formatCapabilityDetail(key: string, item: any): string {
@@ -347,8 +720,13 @@ async function loadUpstreamOptions() {
     const d = await apiGet<any>('/gateway/admin/model-capability-probe/options')
     upstreamOptions.value = d.upstreams || []
     if (upstreamOptions.value.length > 0) {
-      selectedUpstreamId.value = upstreamOptions.value[0].id
+      const firstId = upstreamOptions.value[0].id
+      selectedUpstreamId.value = firstId
+      embUpstreamId.value = firstId
+      rrUpstreamId.value = firstId
       onUpstreamChange()
+      onEmbUpstreamChange()
+      onRrUpstreamChange()
     }
   } catch (e: any) { ElMessage.error(e.message) }
 }
@@ -395,10 +773,202 @@ function onModeChange() {
   }
 }
 
+async function onEmbUpstreamChange() {
+  if (!embUpstreamId.value) return
+  embUpstreamModels.value = []; embModel.value = ''
+  try {
+    const d = await apiGet<any>(`/gateway/admin/model-capability-probe/models?upstream_id=${embUpstreamId.value}`)
+    embUpstreamModels.value = d.models || []
+  } catch (e: any) { ElMessage.error(e.message) }
+}
+
+function onEmbCustomCredentialsChange() {
+  if (embDebounceTimer) clearTimeout(embDebounceTimer)
+  embCustomModels.value = []; embModel.value = ''
+  if (!embCustomUri.value.trim() || !embCustomApiKey.value.trim()) return
+  embDebounceTimer = setTimeout(async () => {
+    try {
+      const d = await apiPost<any>('/gateway/admin/model-capability-probe/models/custom', {
+        uri: embCustomUri.value.trim(), api_key: embCustomApiKey.value.trim(),
+      })
+      embCustomModels.value = d.models || []
+    } catch { }
+  }, 500)
+}
+
+function onEmbModeChange() {
+  embModel.value = ''
+  if (embMode.value === 'upstream' && upstreamOptions.value.length > 0) {
+    embUpstreamId.value = upstreamOptions.value[0].id
+    onEmbUpstreamChange()
+  }
+}
+
+async function generateEmbeddingTexts() {
+  embGenerating.value = true
+  try {
+    const d = await apiPost<{ text_a?: string; text_b?: string }>(
+      '/settings/admin/llm/generate-probe-texts',
+      { kind: 'embedding' },
+    )
+    embTextA.value = d.text_a || ''
+    embTextB.value = d.text_b || ''
+    if (!embTextA.value || !embTextB.value) {
+      ElMessage.warning('生成结果不完整，请重试')
+      return
+    }
+    ElMessage.success('占位文本已生成')
+  } catch (e: any) {
+    ElMessage.error(e.message || '生成失败，请先在设置中配置全局大模型')
+  } finally {
+    embGenerating.value = false
+  }
+}
+
+async function runEmbeddingProbe() {
+  if (!embTextA.value.trim() || !embTextB.value.trim()) {
+    ElMessage.warning('请填写两段文本')
+    return
+  }
+  embProbing.value = true
+  embReport.value = null
+  embReportVisible.value = false
+  try {
+    const body: any = embMode.value === 'upstream'
+      ? {
+          mode: 'upstream',
+          upstream_id: embUpstreamId.value,
+          model: embModel.value,
+          text_a: embTextA.value.trim(),
+          text_b: embTextB.value.trim(),
+        }
+      : {
+          mode: 'custom',
+          uri: embCustomUri.value.trim(),
+          api_key: embCustomApiKey.value.trim(),
+          model: embModel.value,
+          text_a: embTextA.value.trim(),
+          text_b: embTextB.value.trim(),
+        }
+    embReport.value = await apiPost('/gateway/admin/embedding-capability-probe', body)
+    embReportVisible.value = true
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    embProbing.value = false
+  }
+}
+
+async function onRrUpstreamChange() {
+  if (!rrUpstreamId.value) return
+  rrUpstreamModels.value = []; rrModel.value = ''
+  try {
+    const d = await apiGet<any>(`/gateway/admin/model-capability-probe/models?upstream_id=${rrUpstreamId.value}`)
+    rrUpstreamModels.value = d.models || []
+  } catch (e: any) { ElMessage.error(e.message) }
+}
+
+function onRrCustomCredentialsChange() {
+  if (rrDebounceTimer) clearTimeout(rrDebounceTimer)
+  rrCustomModels.value = []; rrModel.value = ''
+  if (!rrCustomUri.value.trim() || !rrCustomApiKey.value.trim()) return
+  rrDebounceTimer = setTimeout(async () => {
+    try {
+      const d = await apiPost<any>('/gateway/admin/model-capability-probe/models/custom', {
+        uri: rrCustomUri.value.trim(), api_key: rrCustomApiKey.value.trim(),
+      })
+      rrCustomModels.value = d.models || []
+    } catch { }
+  }, 500)
+}
+
+function onRrModeChange() {
+  rrModel.value = ''
+  if (rrMode.value === 'upstream' && upstreamOptions.value.length > 0) {
+    rrUpstreamId.value = upstreamOptions.value[0].id
+    onRrUpstreamChange()
+  }
+}
+
+async function generateRerankTexts() {
+  rrGenerating.value = true
+  try {
+    const count = Math.max(2, Math.min(8, rrDocuments.value.length || 3))
+    const d = await apiPost<{ query?: string; documents?: string[] }>(
+      '/settings/admin/llm/generate-probe-texts',
+      { kind: 'rerank', document_count: count < 3 ? 3 : count },
+    )
+    rrQuery.value = d.query || ''
+    const docs = (d.documents || []).map(x => String(x || '').trim()).filter(Boolean)
+    if (!rrQuery.value || docs.length < 2) {
+      ElMessage.warning('生成结果不完整，请重试')
+      return
+    }
+    rrDocuments.value = docs
+    ElMessage.success('占位文本已生成')
+  } catch (e: any) {
+    ElMessage.error(e.message || '生成失败，请先在设置中配置全局大模型')
+  } finally {
+    rrGenerating.value = false
+  }
+}
+
+function addRrDocument() {
+  rrDocuments.value.push('')
+}
+
+function removeRrDocument(idx: number) {
+  if (rrDocuments.value.length <= 2) return
+  rrDocuments.value.splice(idx, 1)
+}
+
+async function runRerankProbe() {
+  const docs = rrDocuments.value.map(d => d.trim()).filter(Boolean)
+  if (!rrQuery.value.trim()) {
+    ElMessage.warning('请填写查询文本')
+    return
+  }
+  if (docs.length < 2) {
+    ElMessage.warning('请至少填写 2 条候选结果')
+    return
+  }
+  rrProbing.value = true
+  rrReport.value = null
+  rrReportVisible.value = false
+  try {
+    const body: any = rrMode.value === 'upstream'
+      ? {
+          mode: 'upstream',
+          upstream_id: rrUpstreamId.value,
+          model: rrModel.value,
+          query: rrQuery.value.trim(),
+          documents: docs,
+        }
+      : {
+          mode: 'custom',
+          uri: rrCustomUri.value.trim(),
+          api_key: rrCustomApiKey.value.trim(),
+          model: rrModel.value,
+          query: rrQuery.value.trim(),
+          documents: docs,
+        }
+    rrReport.value = await apiPost('/gateway/admin/rerank-capability-probe', body)
+    rrReportVisible.value = true
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    rrProbing.value = false
+  }
+}
+
 onMounted(loadUpstreamOptions)
 </script>
 
 <style scoped>
+.probe-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
 .probe-meta {
   margin-bottom: 16px;
 }
@@ -542,5 +1112,68 @@ onMounted(loadUpstreamOptions)
 
 .thinking-table {
   margin-top: 4px;
+}
+
+.emb-similarity {
+  margin-top: 8px;
+  padding: 24px 20px;
+  border-radius: 10px;
+  text-align: center;
+  background: var(--el-color-success-light-9);
+  border: 1px solid var(--el-color-success-light-5);
+}
+
+.emb-similarity__label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 8px;
+}
+
+.emb-similarity__value {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--el-color-success);
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+
+.emb-similarity__raw {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", monospace;
+}
+
+.rr-docs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0 10px;
+  font-size: 14px;
+  color: var(--el-text-color-regular);
+}
+
+.probe-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.rr-doc-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.rr-doc-row .el-input {
+  flex: 1;
+}
+
+.rr-score-raw {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", monospace;
 }
 </style>

@@ -45,11 +45,15 @@ from db.upstreams import (
     update_upstream,
 )
 from tools.gateway.schemas import (
+    EmbeddingCapabilityProbeRequest,
     ModelCapabilityProbeModelsCustomRequest,
     ModelCapabilityProbeRequest,
+    RerankCapabilityProbeRequest,
     TokenSpeedTestRequest,
 )
 from tools.gateway.services.capability_probe import probe_model_capabilities
+from tools.gateway.services.embedding_probe import probe_embedding_similarity
+from tools.gateway.services.rerank_probe import probe_rerank
 from tools.gateway.services.token_speed_test import test_token_speed
 from tools.gateway.services.upstream_client import (
     UpstreamRuntimeConfig,
@@ -374,6 +378,49 @@ async def admin_create_upstream(request: Request, session: AsyncSession = Depend
     return JSONResponse(status_code=201, content=row)
 
 
+# Must be registered before /upstreams/{upstream_id} so "test" is not parsed as an int id.
+@router.post("/upstreams/test")
+async def admin_test_upstream(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    raw = await read_request_json(request)
+    body = raw if isinstance(raw, dict) else {}
+    cfg = await _runtime_config_from_test_body(session, body)
+    t0 = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(
+            base_url=cfg.base_url,
+            timeout=cfg.timeout_seconds,
+            trust_env=cfg.trust_env,
+        ) as client:
+            resp = await client.get(
+                "/models",
+                headers=upstream_auth_headers(cfg.api_key),
+            )
+    except httpx.TimeoutException:
+        return JSONResponse(status_code=200, content={
+            "ok": False,
+            "error": "timeout",
+            "latency_ms": int((time.perf_counter() - t0) * 1000),
+        })
+    except httpx.HTTPError as exc:
+        return JSONResponse(status_code=200, content={
+            "ok": False,
+            "error": str(exc),
+            "latency_ms": int((time.perf_counter() - t0) * 1000),
+        })
+    latency_ms = int((time.perf_counter() - t0) * 1000)
+    preview: Any
+    try:
+        preview = resp.json()
+    except ValueError:
+        preview = {"raw": (resp.text or "")[:800]}
+    return JSONResponse(status_code=200, content={
+        "ok": not resp.is_error,
+        "upstream_status_code": resp.status_code,
+        "latency_ms": latency_ms,
+        "body": preview,
+    })
+
+
 @router.api_route("/upstreams/{upstream_id}", methods=["PATCH", "POST"])
 async def admin_patch_upstream(request: Request, upstream_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     body = await read_request_json(request)
@@ -507,48 +554,6 @@ async def admin_delete_public_model(model_id: int, session: AsyncSession = Depen
     return JSONResponse(content={"ok": True, "deleted_id": model_id})
 
 
-@router.post("/upstreams/test")
-async def admin_test_upstream(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
-    raw = await read_request_json(request)
-    body = raw if isinstance(raw, dict) else {}
-    cfg = await _runtime_config_from_test_body(session, body)
-    t0 = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(
-            base_url=cfg.base_url,
-            timeout=cfg.timeout_seconds,
-            trust_env=cfg.trust_env,
-        ) as client:
-            resp = await client.get(
-                "/models",
-                headers=upstream_auth_headers(cfg.api_key),
-            )
-    except httpx.TimeoutException:
-        return JSONResponse(status_code=200, content={
-            "ok": False,
-            "error": "timeout",
-            "latency_ms": int((time.perf_counter() - t0) * 1000),
-        })
-    except httpx.HTTPError as exc:
-        return JSONResponse(status_code=200, content={
-            "ok": False,
-            "error": str(exc),
-            "latency_ms": int((time.perf_counter() - t0) * 1000),
-        })
-    latency_ms = int((time.perf_counter() - t0) * 1000)
-    preview: Any
-    try:
-        preview = resp.json()
-    except ValueError:
-        preview = {"raw": (resp.text or "")[:800]}
-    return JSONResponse(status_code=200, content={
-        "ok": not resp.is_error,
-        "upstream_status_code": resp.status_code,
-        "latency_ms": latency_ms,
-        "body": preview,
-    })
-
-
 @router.get("/model-capability-probe/options")
 async def admin_model_capability_probe_options(session: AsyncSession = Depends(get_session)) -> JSONResponse:
     rows = await list_enabled_upstream_rows(session)
@@ -580,7 +585,7 @@ async def admin_model_capability_probe_models_custom(request: Request) -> JSONRe
 
 async def _resolve_probe_credentials(
     session: AsyncSession,
-    body: ModelCapabilityProbeRequest,
+    body: ModelCapabilityProbeRequest | EmbeddingCapabilityProbeRequest | RerankCapabilityProbeRequest,
 ) -> tuple[str, str, str]:
     if body.mode == "upstream":
         row = await get_upstream_runtime(session, int(body.upstream_id))
@@ -712,6 +717,56 @@ async def admin_model_capability_probe(request: Request, session: AsyncSession =
     report = await asyncio.to_thread(
         probe_model_capabilities, uri, api_key, model,
         timeout=body.timeout, max_tokens=body.max_tokens,
+    )
+    report["total_elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
+    return JSONResponse(content=report)
+
+
+@router.post("/embedding-capability-probe")
+async def admin_embedding_capability_probe(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    raw = await read_request_json(request)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    try:
+        body = EmbeddingCapabilityProbeRequest.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from None
+
+    uri, api_key, model = await _resolve_probe_credentials(session, body)
+    t0 = time.perf_counter()
+    report = await asyncio.to_thread(
+        probe_embedding_similarity,
+        uri,
+        api_key,
+        model,
+        body.text_a.strip(),
+        body.text_b.strip(),
+        timeout=body.timeout,
+    )
+    report["total_elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
+    return JSONResponse(content=report)
+
+
+@router.post("/rerank-capability-probe")
+async def admin_rerank_capability_probe(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    raw = await read_request_json(request)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    try:
+        body = RerankCapabilityProbeRequest.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from None
+
+    uri, api_key, model = await _resolve_probe_credentials(session, body)
+    t0 = time.perf_counter()
+    report = await asyncio.to_thread(
+        probe_rerank,
+        uri,
+        api_key,
+        model,
+        body.query.strip(),
+        list(body.documents),
+        timeout=body.timeout,
     )
     report["total_elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
     return JSONResponse(content=report)

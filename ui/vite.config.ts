@@ -4,9 +4,9 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   server: {
-    // 5173 falls in Windows excluded range 5109-5208 (Hyper-V/NAT) → EACCES
+    // Avoid Windows Hyper-V/NAT excluded ranges (currently includes 5240-5339) → EACCES
     host: '0.0.0.0',
-    port: 5300,
+    port: 5400,
     strictPort: true,
     allowedHosts: [
       '.vicp.fun',             // 以后换花生壳域名也自动过
@@ -19,6 +19,7 @@ export default defineConfig({
       '/gateway/logs': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/video-tools/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/doc-tools/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/settings/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/healthz': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },

@@ -3,7 +3,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 call :kill_port 8000
-call :kill_port 5300
+call :kill_port 5400
 
 echo [Spy-Look] 启动后端 API ...
 start "Spy-Look API" cmd /k "pushd "%~dp0api" && uv run python main.py"
@@ -13,7 +13,7 @@ start "Spy-Look UI" cmd /k "pushd "%~dp0ui" && npm run dev"
 
 echo.
 echo 后端: http://127.0.0.1:8000
-echo 前端: http://127.0.0.1:5300  （开发模式，API 代理到 8000）
+echo 前端: http://127.0.0.1:5400  （开发模式，API 代理到 8000）
 echo.
 echo 两个窗口已打开，关闭对应窗口即可停止服务。
 pause

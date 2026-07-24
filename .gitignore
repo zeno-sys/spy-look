@@ -25,6 +25,8 @@ spy_look.db
 spy_look.db-*
 api/video_tools_config.json
 video_tools_config.json
+api/settings_config.json
+settings_config.json
 
 # Logs
 *.log

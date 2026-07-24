@@ -37,6 +37,18 @@
           </el-menu-item>
         </el-sub-menu>
       </el-menu>
+      <div class="sidebar-footer">
+        <el-menu
+          :default-active="activeMenu"
+          router
+          class="sidebar-footer-menu"
+        >
+          <el-menu-item index="/settings">
+            <el-icon><Setting /></el-icon>
+            <span>设置</span>
+          </el-menu-item>
+        </el-menu>
+      </div>
     </el-aside>
     <el-main class="app-content">
       <router-view />
@@ -47,7 +59,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { HomeFilled } from '@element-plus/icons-vue'
+import { HomeFilled, Setting } from '@element-plus/icons-vue'
 import { tools } from '../config/tools'
 
 const route = useRoute()
@@ -55,6 +67,7 @@ const route = useRoute()
 const activeMenu = computed(() => {
   const path = route.path
   if (path === '/') return '/'
+  if (path === '/settings' || path.startsWith('/settings/')) return '/settings'
   for (const tool of tools) {
     for (const item of tool.menuItems) {
       if (path === item.path || path.startsWith(item.path + '/')) {

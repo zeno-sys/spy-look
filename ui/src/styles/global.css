@@ -79,7 +79,8 @@ body {
 }
 
 #app-root, .app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .app-shell {
@@ -93,7 +94,8 @@ body {
   border-right: 1px solid var(--sl-sidebar-border);
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar-brand {
@@ -102,6 +104,7 @@ body {
   gap: 12px;
   padding: 20px 16px 16px;
   border-bottom: 1px solid var(--sl-sidebar-border);
+  flex-shrink: 0;
 }
 
 .sidebar-logo {
@@ -137,9 +140,33 @@ body {
 
 .sidebar-menu {
   border-right: none !important;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 8px;
   background: transparent !important;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sidebar-footer {
+  flex: 0 0 auto;
+  margin-top: auto;
+  border-top: 1px solid var(--sl-sidebar-border);
+  background: var(--sl-sidebar-bg);
+}
+
+.sidebar-footer-menu {
+  border-right: none !important;
+  padding: 8px;
+  background: transparent !important;
+}
+
+.sidebar-footer-menu.el-menu {
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: var(--sl-sidebar-text);
+  --el-menu-hover-bg-color: var(--sl-sidebar-hover);
+  --el-menu-active-color: var(--sl-accent);
+  --el-menu-item-height: 40px;
 }
 
 .sidebar-menu.el-menu {
@@ -151,20 +178,23 @@ body {
 }
 
 .sidebar-menu .el-menu-item,
-.sidebar-menu .el-sub-menu__title {
+.sidebar-menu .el-sub-menu__title,
+.sidebar-footer-menu .el-menu-item {
   border-radius: var(--sl-radius-sm);
   margin-bottom: 2px;
   font-size: 13px;
 }
 
-.sidebar-menu .el-menu-item.is-active {
+.sidebar-menu .el-menu-item.is-active,
+.sidebar-footer-menu .el-menu-item.is-active {
   background: var(--sl-sidebar-active) !important;
   color: var(--sl-accent) !important;
   font-weight: 500;
 }
 
 .sidebar-menu .el-menu-item:hover,
-.sidebar-menu .el-sub-menu__title:hover {
+.sidebar-menu .el-sub-menu__title:hover,
+.sidebar-footer-menu .el-menu-item:hover {
   background: var(--sl-sidebar-hover) !important;
 }
 
@@ -173,7 +203,8 @@ body {
   min-width: auto;
 }
 
-.sidebar-menu .el-icon {
+.sidebar-menu .el-icon,
+.sidebar-footer-menu .el-icon {
   font-size: 16px;
 }
 
@@ -181,6 +212,7 @@ body {
 
 .app-content {
   padding: 0;
+  height: 100vh;
   overflow: auto;
   background: var(--sl-bg);
 }
