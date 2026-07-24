@@ -74,17 +74,21 @@ const md: MarkdownIt = new MarkdownIt({
 md.use(markdownItKatex, { throwOnError: false, errorColor: '#cc0000' })
 md.use(taskLists, { enabled: true, label: true, labelAfter: true })
 
-const defaultFence = md.renderer.rules.fence
-md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+md.renderer.rules.fence = (tokens, idx) => {
   const token = tokens[idx]
-  const info = (token.info || '').trim().split(/\s+/g)[0]
+  const info = (token.info || '').trim().split(/\s+/g)[0] || ''
   if (info.toLowerCase() === 'mermaid') {
     return `<div class="mermaid">${escapeHtml(token.content)}</div>\n`
   }
-  if (defaultFence) {
-    return defaultFence(tokens, idx, options, env, self)
-  }
-  return self.renderToken(tokens, idx, options)
+  const highlighted = fenceHighlight(token.content, info)
+  const langLabel = info ? escapeHtml(info) : 'text'
+  return (
+    `<div class="md-code-block">` +
+    `<div class="md-code-toolbar">` +
+    `<span class="md-code-lang">${langLabel}</span>` +
+    `<button type="button" class="md-code-copy">复制</button>` +
+    `</div>${highlighted}</div>\n`
+  )
 }
 
 const defaultHeadingOpen = md.renderer.rules.heading_open

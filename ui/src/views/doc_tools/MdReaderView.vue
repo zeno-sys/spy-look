@@ -156,6 +156,16 @@
           >
             <el-button size="small" :disabled="busy">插入图片</el-button>
           </el-upload>
+          <el-button
+            size="small"
+            :disabled="!currentId"
+            :type="outlineOpen ? 'primary' : 'default'"
+            plain
+            @click="outlineOpen = !outlineOpen"
+          >
+            <el-icon class="toolbar-icon"><List /></el-icon>
+            大纲
+          </el-button>
         </div>
 
         <div class="workspace">
@@ -174,35 +184,35 @@
               v-html="previewHtml"
             />
             <div v-if="!currentId" class="content-placeholder">从左侧打开文档开始编辑</div>
-          </div>
 
-          <aside class="outline-pane" :class="{ collapsed: outlineCollapsed }">
-            <div class="pane-header">
-              <span v-if="!outlineCollapsed">大纲</span>
-              <el-button
-                link
-                size="small"
-                :title="outlineCollapsed ? '展开大纲' : '收起大纲'"
-                @click="outlineCollapsed = !outlineCollapsed"
-              >
-                <el-icon :size="14">
-                  <DArrowLeft v-if="outlineCollapsed" />
-                  <DArrowRight v-else />
-                </el-icon>
-              </el-button>
-            </div>
-            <ul v-if="!outlineCollapsed" class="outline-list">
-              <li v-if="!outline.length" class="pane-empty">无标题</li>
-              <li
-                v-for="item in outline"
-                :key="`${item.line}-${item.text}`"
-                :class="`lv-${item.level}`"
-                @click="jumpToHeading(item.line)"
-              >
-                {{ item.text }}
-              </li>
-            </ul>
-          </aside>
+            <aside v-if="currentId && outlineOpen" class="outline-float">
+              <div class="outline-float-header">
+                <span>大纲</span>
+                <span class="outline-float-count">{{ outline.length }}</span>
+                <el-button
+                  link
+                  size="small"
+                  class="outline-float-close"
+                  title="关闭大纲"
+                  @click="outlineOpen = false"
+                >
+                  <el-icon :size="14"><Close /></el-icon>
+                </el-button>
+              </div>
+              <ul class="outline-list">
+                <li v-if="!outline.length" class="pane-empty">无标题</li>
+                <li
+                  v-for="item in outline"
+                  :key="`${item.line}-${item.text}`"
+                  :class="`lv-${item.level}`"
+                  :title="item.text"
+                  @click="jumpToHeading(item.line)"
+                >
+                  {{ item.text }}
+                </li>
+              </ul>
+            </aside>
+          </div>
         </div>
       </section>
     </div>
@@ -211,6 +221,7 @@
       <div
         v-if="imgViewerVisible"
         class="md-img-lightbox"
+        :class="{ 'is-diagram': lightboxKind === 'diagram' }"
         role="dialog"
         aria-modal="true"
         @click.self="closeImgViewer"
@@ -230,7 +241,7 @@
         <img
           class="md-img-lightbox__img"
           :src="imgViewerUrls[imgViewerIndex]"
-          alt="预览图片"
+          :alt="lightboxKind === 'diagram' ? 'Mermaid 图' : '预览图片'"
           @click.stop
         />
         <button
@@ -254,7 +265,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadRequestOptions } from 'element-plus'
-import { DArrowLeft, DArrowRight, Document, MoreFilled, Plus, Upload } from '@element-plus/icons-vue'
+import { Close, DArrowLeft, DArrowRight, Document, List, MoreFilled, Plus, Upload } from '@element-plus/icons-vue'
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
@@ -296,7 +307,7 @@ const currentId = ref<number | null>(null)
 const content = ref('')
 const titleDraft = ref('')
 const viewMode = ref<ViewMode>('source')
-const outlineCollapsed = ref(false)
+const outlineOpen = ref(false)
 const filePaneCollapsed = ref(false)
 const saveStatus = ref<SaveStatus>('idle')
 const editorHost = ref<HTMLElement | null>(null)
@@ -305,6 +316,7 @@ const editorView = shallowRef<EditorView | null>(null)
 const imgViewerVisible = ref(false)
 const imgViewerUrls = ref<string[]>([])
 const imgViewerIndex = ref(0)
+const lightboxKind = ref<'image' | 'diagram'>('image')
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let applyingEditor = false
@@ -396,7 +408,37 @@ function openImgViewer(src: string) {
     .filter((u): u is string => Boolean(u))
   if (!imgs.length) return
   const index = imgs.indexOf(src)
+  lightboxKind.value = 'image'
   imgViewerUrls.value = imgs
+  imgViewerIndex.value = index >= 0 ? index : 0
+  imgViewerVisible.value = true
+}
+
+function svgToDataUrl(svg: SVGSVGElement): string {
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  if (!clone.getAttribute('xmlns')) {
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  }
+  // Prefer readable size in lightbox
+  clone.style.maxWidth = '100%'
+  clone.style.height = 'auto'
+  clone.removeAttribute('width')
+  clone.removeAttribute('height')
+  const xml = new XMLSerializer().serializeToString(clone)
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`
+}
+
+function openMermaidViewer(svg: SVGSVGElement) {
+  const host = previewHost.value
+  if (!host) return
+  const svgs = Array.from(host.querySelectorAll('.mermaid-chart svg')).filter(
+    (el): el is SVGSVGElement => el instanceof SVGSVGElement,
+  )
+  if (!svgs.length) return
+  const urls = svgs.map((s) => svgToDataUrl(s))
+  const index = svgs.indexOf(svg)
+  lightboxKind.value = 'diagram'
+  imgViewerUrls.value = urls
   imgViewerIndex.value = index >= 0 ? index : 0
   imgViewerVisible.value = true
 }
@@ -414,8 +456,28 @@ function switchImg(delta: number) {
 function onPreviewClick(event: MouseEvent) {
   const raw = event.target
   if (!(raw instanceof Element)) return
-  // Ignore mermaid / katex internals
-  if (raw.closest('.mermaid-chart, .mermaid, .katex')) return
+
+  const copyBtn = raw.closest('button.md-code-copy')
+  if (copyBtn instanceof HTMLButtonElement) {
+    event.preventDefault()
+    event.stopPropagation()
+    void copyCodeBlock(copyBtn)
+    return
+  }
+
+  if (raw.closest('.katex')) return
+
+  const mermaidWrap = raw.closest('.mermaid-chart')
+  if (mermaidWrap) {
+    const svg = mermaidWrap.querySelector('svg')
+    if (svg instanceof SVGSVGElement) {
+      event.preventDefault()
+      event.stopPropagation()
+      openMermaidViewer(svg)
+    }
+    return
+  }
+
   const target = raw.closest('img')
   if (!(target instanceof HTMLImageElement)) return
   const src = target.currentSrc || target.getAttribute('src') || target.src
@@ -423,6 +485,28 @@ function onPreviewClick(event: MouseEvent) {
   event.preventDefault()
   event.stopPropagation()
   openImgViewer(src)
+}
+
+async function copyCodeBlock(btn: HTMLButtonElement) {
+  const block = btn.closest('.md-code-block')
+  const code = block?.querySelector('code, pre')
+  const text = code?.textContent ?? ''
+  if (!text) {
+    ElMessage.warning('没有可复制的内容')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    const prev = btn.textContent
+    btn.textContent = '已复制'
+    btn.classList.add('is-copied')
+    window.setTimeout(() => {
+      btn.textContent = prev || '复制'
+      btn.classList.remove('is-copied')
+    }, 1500)
+  } catch {
+    ElMessage.error('复制失败')
+  }
 }
 
 function onLightboxKeydown(event: KeyboardEvent) {
@@ -954,8 +1038,7 @@ onBeforeUnmount(() => {
   gap: 0;
 }
 
-.file-pane.collapsed .pane-header,
-.outline-pane.collapsed .pane-header {
+.file-pane.collapsed .pane-header {
   justify-content: center;
   padding: 8px 4px;
 }
@@ -1133,6 +1216,10 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--el-border-color-extra-light);
 }
 
+.toolbar-icon {
+  margin-right: 4px;
+}
+
 .workspace {
   flex: 1;
   min-height: 0;
@@ -1174,48 +1261,84 @@ onBeforeUnmount(() => {
   font-size: 14px;
 }
 
-.outline-pane {
-  width: 220px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--el-border-color-lighter);
-  background: #fafafa;
+.outline-float {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(280px, calc(100% - 24px));
+  z-index: 5;
   display: flex;
   flex-direction: column;
-  transition: width 0.2s ease;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 10px;
+  box-shadow: 0 10px 36px rgba(45, 55, 50, 0.14);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  pointer-events: auto;
 }
 
-.outline-pane.collapsed {
-  width: 40px;
+.outline-float-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  flex-shrink: 0;
+}
+
+.outline-float-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 18px;
+}
+
+.outline-float-close {
+  margin-left: auto;
 }
 
 .outline-list {
   list-style: none;
   margin: 0;
-  padding: 8px 0;
+  padding: 6px 0 10px;
   overflow: auto;
   flex: 1;
 }
 
+.outline-list .pane-empty {
+  padding: 16px 14px;
+  text-align: left;
+}
+
 .outline-list li {
-  padding: 4px 12px;
+  padding: 5px 12px;
   font-size: 12px;
+  line-height: 1.4;
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--el-text-color-regular);
 }
 
 .outline-list li:hover {
-  background: #eef6f4;
-  color: var(--el-color-primary);
+  background: rgba(15, 118, 110, 0.08);
+  color: #0f766e;
 }
 
-.outline-list .lv-1 { padding-left: 12px; font-weight: 600; }
-.outline-list .lv-2 { padding-left: 20px; }
-.outline-list .lv-3 { padding-left: 28px; }
-.outline-list .lv-4 { padding-left: 36px; }
-.outline-list .lv-5 { padding-left: 44px; }
-.outline-list .lv-6 { padding-left: 52px; }
+.outline-list .lv-1 { padding-left: 12px; font-weight: 600; color: var(--el-text-color-primary); }
+.outline-list .lv-2 { padding-left: 22px; }
+.outline-list .lv-3 { padding-left: 32px; }
+.outline-list .lv-4 { padding-left: 42px; }
+.outline-list .lv-5 { padding-left: 52px; }
+.outline-list .lv-6 { padding-left: 62px; }
 </style>
 
 <style>
@@ -1289,6 +1412,63 @@ onBeforeUnmount(() => {
   vertical-align: middle;
 }
 
+.md-preview .md-code-block {
+  position: relative;
+  margin: 1em 0;
+  border: 1px solid rgba(15, 118, 110, 0.14);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f6f8fa;
+}
+
+.md-preview .md-code-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: linear-gradient(180deg, #f0fafa 0%, #e8f3f1 100%);
+  border-bottom: 1px solid rgba(15, 118, 110, 0.1);
+}
+
+.md-preview .md-code-lang {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: #0f766e;
+  opacity: 0.85;
+}
+
+.md-preview .md-code-copy {
+  appearance: none;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  background: #fff;
+  color: #0f766e;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.md-preview .md-code-copy:hover {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.md-preview .md-code-copy.is-copied {
+  border-color: rgba(15, 118, 110, 0.4);
+  background: rgba(15, 118, 110, 0.12);
+}
+
+.md-preview .md-code-block > pre {
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+}
+
 .md-preview pre {
   overflow: auto;
   padding: 12px 14px;
@@ -1308,15 +1488,60 @@ onBeforeUnmount(() => {
 }
 
 .md-preview table {
-  border-collapse: collapse;
   width: 100%;
-  margin: 1em 0;
+  margin: 1.15em 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 13.5px;
+  line-height: 1.55;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(45, 55, 50, 0.04);
+}
+
+.md-preview thead th {
+  background: linear-gradient(180deg, #f0fafa 0%, #e6f4f1 100%);
+  color: #0f766e;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-align: left;
+  white-space: nowrap;
 }
 
 .md-preview th,
 .md-preview td {
-  border: 1px solid #d0d7de;
-  padding: 6px 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(15, 118, 110, 0.1);
+  border-right: 1px solid rgba(15, 118, 110, 0.08);
+  vertical-align: top;
+}
+
+.md-preview th:last-child,
+.md-preview td:last-child {
+  border-right: none;
+}
+
+.md-preview tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.md-preview tbody tr:nth-child(even) td {
+  background: rgba(15, 118, 110, 0.03);
+}
+
+.md-preview tbody tr:hover td {
+  background: rgba(15, 118, 110, 0.07);
+}
+
+.md-preview td {
+  color: var(--el-text-color-regular, #4b5563);
+}
+
+.md-preview th code,
+.md-preview td code {
+  font-size: 0.9em;
 }
 
 .md-preview img {
@@ -1344,6 +1569,13 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
   cursor: default;
+}
+
+.md-img-lightbox.is-diagram .md-img-lightbox__img {
+  background: #fff;
+  padding: 20px 24px;
+  border-radius: 10px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
 }
 
 .md-img-lightbox__close {
@@ -1409,6 +1641,7 @@ onBeforeUnmount(() => {
   text-align: center;
   overflow: hidden;
   line-height: normal;
+  cursor: zoom-in;
 }
 
 .md-preview .mermaid-chart svg {
@@ -1416,6 +1649,7 @@ onBeforeUnmount(() => {
   margin: 0 auto;
   max-width: 100%;
   height: auto !important;
+  pointer-events: none;
 }
 
 .md-preview .mermaid-error {
