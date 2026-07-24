@@ -169,6 +169,15 @@ def _build_http_headers(url: str) -> dict[str, str]:
 
 def _format_download_error(url: str, exc: Exception) -> str:
     message = str(exc)
+    if "Could not copy Chrome cookie database" in message:
+        browser = str(_ytdlp.get("cookies_from_browser") or "chrome").strip() or "chrome"
+        hint = (
+            f"无法从浏览器（当前 ytdlp.cookies_from_browser={browser}）复制 Cookie 数据库。"
+            "Chromium 系浏览器（Chrome/Edge）在运行时会锁定 Cookies 文件。"
+            "请完全退出对应浏览器后重试；或改为 firefox；"
+            "也可导出 Netscape 格式 cookies.txt 后改用 ytdlp.cookies_file。"
+        )
+        return f"页面视频下载失败: {hint}"
     if _is_bilibili_url(url) and ("412" in message or "Precondition Failed" in message):
         hint = (
             "哔哩哔哩返回 HTTP 412（反爬校验）。"

@@ -29,9 +29,13 @@ export async function apiPost<T = any>(path: string, body?: any): Promise<T> {
 }
 
 export async function apiPatch<T = any>(path: string, body?: any): Promise<T> {
+  // Use POST: peanut-shell / some WAFs drop PATCH and return ERR_EMPTY_RESPONSE
   const res = await fetch(BASE + path, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-HTTP-Method-Override': 'PATCH',
+    },
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {

@@ -2,6 +2,9 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
+call :kill_port 8000
+call :kill_port 5300
+
 echo [Spy-Look] 启动后端 API ...
 start "Spy-Look API" cmd /k "pushd "%~dp0api" && uv run python main.py"
 
@@ -10,7 +13,19 @@ start "Spy-Look UI" cmd /k "pushd "%~dp0ui" && npm run dev"
 
 echo.
 echo 后端: http://127.0.0.1:8000
-echo 前端: http://127.0.0.1:5173  （开发模式，API 代理到 8000）
+echo 前端: http://127.0.0.1:5300  （开发模式，API 代理到 8000）
 echo.
 echo 两个窗口已打开，关闭对应窗口即可停止服务。
 pause
+exit /b 0
+
+:kill_port
+setlocal
+set "PORT=%~1"
+echo [Spy-Look] 检查端口 %PORT% ...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R /C:":%PORT% .*LISTENING"') do (
+  echo [Spy-Look] 停止占用端口 %PORT% 的进程 PID=%%a
+  taskkill /F /PID %%a >nul 2>&1
+)
+endlocal
+exit /b 0

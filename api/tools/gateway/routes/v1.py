@@ -35,8 +35,11 @@ async def read_request_json(request: Request) -> Any:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from None
 
 
-def parse_response_json(response: httpx.Response) -> Any:
+async def parse_response_json(response: httpx.Response) -> Any:
     try:
+        # stream=True responses need an explicit read before .json()
+        if not response.is_stream_consumed:
+            await response.aread()
         return response.json()
     except ValueError:
         return {
@@ -127,8 +130,12 @@ async def create_chat_completions(
                 continue
 
             if upstream_response.is_error:
-                parsed = parse_response_json(upstream_response)
-                return normalize_upstream_error(upstream_response.status_code, parsed)
+                try:
+                    parsed = await parse_response_json(upstream_response)
+                    return normalize_upstream_error(upstream_response.status_code, parsed)
+                finally:
+                    await upstream_response.aclose()
+                    await client.close()
             selected_upstream_model = route.upstream_model
             break
         else:
@@ -190,7 +197,7 @@ async def create_chat_completions(
         return no_available_route_error()
 
     elapsed_ms = int((time.perf_counter() - start) * 1000)
-    payload = parse_response_json(upstream_response)
+    payload = await parse_response_json(upstream_response)
     usage = payload.get("usage") if isinstance(payload, dict) else {}
     input_tokens = usage.get("prompt_tokens") if isinstance(usage, dict) else None
     output_tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None

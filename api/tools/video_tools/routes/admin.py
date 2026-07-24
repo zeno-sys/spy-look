@@ -80,7 +80,7 @@ async def get_config() -> dict[str, Any]:
     return _mask_config(load_config())
 
 
-@router.patch("/config")
+@router.api_route("/config", methods=["PATCH", "POST"])
 async def patch_config(body: VideoToolsConfigPatch) -> dict[str, Any]:
     current = load_config()
     patch = body.model_dump(exclude_none=True)

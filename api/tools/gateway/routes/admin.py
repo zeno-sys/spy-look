@@ -307,7 +307,7 @@ async def admin_add_client_key(request: Request, session: AsyncSession = Depends
     })
 
 
-@router.patch("/gateway-client-keys/{key_id}")
+@router.api_route("/gateway-client-keys/{key_id}", methods=["PATCH", "POST"])
 async def admin_patch_client_key(key_id: int, request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     raw = await read_request_json(request)
     if not isinstance(raw, dict):
@@ -374,7 +374,7 @@ async def admin_create_upstream(request: Request, session: AsyncSession = Depend
     return JSONResponse(status_code=201, content=row)
 
 
-@router.patch("/upstreams/{upstream_id}")
+@router.api_route("/upstreams/{upstream_id}", methods=["PATCH", "POST"])
 async def admin_patch_upstream(request: Request, upstream_id: int, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     body = await read_request_json(request)
     if not isinstance(body, dict):
@@ -469,7 +469,7 @@ async def admin_create_public_model(request: Request, session: AsyncSession = De
     return JSONResponse(status_code=201, content=row)
 
 
-@router.patch("/public-models/{model_id}")
+@router.api_route("/public-models/{model_id}", methods=["PATCH", "POST"])
 async def admin_patch_public_model(
     request: Request,
     model_id: int,
