@@ -32,8 +32,8 @@ export const tools: ToolDefinition[] = [
     },
     homePath: '/gateway/observability',
     menuItems: [
-      { path: '/gateway/observability', title: '请求日志' },
       { path: '/gateway/model-config', title: '模型配置' },
+      { path: '/gateway/observability', title: '请求日志' },
       { path: '/gateway/model-capability-probe', title: '能力测试' },
       { path: '/gateway/token-speed-test', title: 'Token 测试' },
       { path: '/gateway/vram-calculator', title: '显存计算' },
@@ -58,7 +58,7 @@ export const tools: ToolDefinition[] = [
   {
     id: 'doc-tools',
     title: '文档工具',
-    description: '文档处理：Markdown 转 Word、标题自动编号等。',
+    description: '文档处理：Markdown 阅读编辑、转 Word、标题自动编号。',
     icon: 'Document',
     accent: {
       gradient: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
@@ -69,6 +69,7 @@ export const tools: ToolDefinition[] = [
     menuItems: [
       { path: '/doc-tools/md-to-docx', title: 'MD 转 DOCX' },
       { path: '/doc-tools/md-heading-numbering', title: 'MD 标题编号' },
+      { path: '/doc-tools/md-reader', title: 'MD 编辑器' },
     ],
   },
 ]

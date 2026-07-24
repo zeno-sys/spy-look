@@ -1,6 +1,6 @@
 <template>
   <el-container class="app-shell">
-    <el-aside width="232px" class="app-sidebar">
+    <el-aside :width="sidebarCollapsed ? '64px' : '232px'" class="app-sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-brand">
         <div class="sidebar-logo" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -8,7 +8,7 @@
             <circle cx="12" cy="12" r="2.5" fill="white"/>
           </svg>
         </div>
-        <div class="sidebar-brand-text">
+        <div v-show="!sidebarCollapsed" class="sidebar-brand-text">
           <h2>Spy-Look</h2>
           <span class="sidebar-tagline">个人工具合集</span>
         </div>
@@ -16,12 +16,14 @@
       <el-menu
         :default-active="activeMenu"
         :default-openeds="['gateway', 'video-tools', 'doc-tools']"
+        :collapse="sidebarCollapsed"
+        :collapse-transition="false"
         router
         class="sidebar-menu"
       >
         <el-menu-item index="/">
           <el-icon><HomeFilled /></el-icon>
-          <span>首页</span>
+          <template #title>首页</template>
         </el-menu-item>
         <el-sub-menu v-for="tool in tools" :key="tool.id" :index="tool.id">
           <template #title>
@@ -40,14 +42,28 @@
       <div class="sidebar-footer">
         <el-menu
           :default-active="activeMenu"
+          :collapse="sidebarCollapsed"
+          :collapse-transition="false"
           router
           class="sidebar-footer-menu"
         >
           <el-menu-item index="/settings">
             <el-icon><Setting /></el-icon>
-            <span>设置</span>
+            <template #title>设置</template>
           </el-menu-item>
         </el-menu>
+        <button
+          type="button"
+          class="sidebar-collapse-btn"
+          :title="sidebarCollapsed ? '展开菜单' : '收起菜单'"
+          @click="toggleSidebar"
+        >
+          <el-icon :size="16">
+            <Expand v-if="sidebarCollapsed" />
+            <Fold v-else />
+          </el-icon>
+          <span v-show="!sidebarCollapsed">收起菜单</span>
+        </button>
       </div>
     </el-aside>
     <el-main class="app-content">
@@ -57,12 +73,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { HomeFilled, Setting } from '@element-plus/icons-vue'
+import { Expand, Fold, HomeFilled, Setting } from '@element-plus/icons-vue'
 import { tools } from '../config/tools'
 
+const SIDEBAR_KEY = 'spy-look-sidebar-collapsed'
+
 const route = useRoute()
+const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_KEY) === '1')
+
+watch(sidebarCollapsed, (v) => {
+  localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0')
+})
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
 
 const activeMenu = computed(() => {
   const path = route.path

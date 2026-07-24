@@ -458,11 +458,10 @@ async function startNumbering() {
       body = { markdown_content: md, config: numberingConfig }
     }
 
-    const isFormData = body instanceof FormData
     const res = await fetch('/doc-tools/admin/md-heading-numbering', {
       method: 'POST',
-      headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
-      body: isFormData ? body : JSON.stringify(body),
+      headers: body instanceof FormData ? undefined : { 'Content-Type': 'application/json' },
+      body: body instanceof FormData ? body : JSON.stringify(body),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }))

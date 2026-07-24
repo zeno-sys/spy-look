@@ -18,8 +18,10 @@ from tools.doc_tools.services.md_heading_numbering import (
     add_heading_numbering,
 )
 from tools.doc_tools.services.md_to_docx import DocTool, HeadingStyleConfig
+from tools.doc_tools.routes.md_reader import router as md_reader_router
 
 router = APIRouter(prefix="/doc-tools/admin", tags=["doc-tools-admin"])
+router.include_router(md_reader_router)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 

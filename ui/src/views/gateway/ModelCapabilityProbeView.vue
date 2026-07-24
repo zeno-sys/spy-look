@@ -80,7 +80,7 @@
             </el-descriptions>
 
             <el-row :gutter="12" class="probe-summary">
-              <el-col v-for="cap in capabilities" :key="cap.key" :span="6">
+              <el-col v-for="cap in capabilities" :key="cap.key" :span="capabilities.length > 4 ? 4 : 6">
                 <div class="probe-stat" :class="capStatClass(cap)">
                   <div class="probe-stat__title">{{ cap.title }}</div>
                   <div class="probe-stat__status">{{ capStatusLabel(cap) }}</div>
@@ -577,6 +577,7 @@ const capabilities = computed(() => {
     { key: 'tool_calling', title: '工具调用', desc: '检查模型是否支持 Function Calling（tools / tool_calls）' },
     { key: 'json_mode', title: '结构化输出', desc: '检查模型是否支持 json_schema 严格结构化输出并可解析' },
     { key: 'thinking', title: '思考模式', desc: '对比开启/关闭思考参数后，模型是否输出可控制的思考内容' },
+    { key: 'vision', title: '图片理解', desc: '发送纯色 PNG（image_url），检查模型是否支持多模态图片理解并能识别主色' },
   ]
   return defs.map(d => {
     const item = report.value[d.key] || {}
@@ -666,6 +667,21 @@ function formatCapabilityDetail(key: string, item: any): string {
     case 'thinking':
       return detail || '未能判定思考模式行为'
 
+    case 'vision':
+      if (item.supported) {
+        return detail || '模型能够理解图片内容并正确识别主色'
+      }
+      if (detail === '请求成功，但回复未正确识别出红色图片') {
+        return '请求已成功，但模型未能正确识别出红色图片（可能不支持视觉输入，或仅忽略了图片）'
+      }
+      if (detail === '响应无有效 content') {
+        return '请求已成功，但响应中未包含可用的文本内容'
+      }
+      if (item.param_rejected) {
+        return '上游拒绝了 image_url / 多模态输入，可能不支持图片理解'
+      }
+      return detail || '图片理解探测未通过'
+
     default:
       return detail || (item.supported ? '探测通过' : '探测未通过')
   }
@@ -701,9 +717,17 @@ function capMetaTags(cap: { key: string; item: any }) {
   if (item.status_code) tags.push({ label: `HTTP ${item.status_code}` })
   if (item.finish_reason) tags.push({ label: `结束原因：${item.finish_reason}` })
   if (item.legacy_format) tags.push({ label: '旧版 function_call', type: 'warning' })
-  if (item.param_rejected) tags.push({ label: '不支持 json_schema', type: 'warning' })
+  if (item.param_rejected) {
+    tags.push({
+      label: cap.key === 'vision' ? '不支持 image_url' : '不支持 json_schema',
+      type: 'warning',
+    })
+  }
   if (cap.key === 'json_mode' && item.mode === 'pydantic_parse') {
     tags.push({ label: 'Pydantic 严格解析', type: 'info' })
+  }
+  if (cap.key === 'vision' && item.mode === 'image_url') {
+    tags.push({ label: 'image_url data URL', type: 'info' })
   }
   return tags
 }

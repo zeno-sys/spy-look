@@ -201,9 +201,6 @@
         <el-form-item>
           <el-button type="primary" @click="applyFilters">查询</el-button>
         </el-form-item>
-        <el-form-item>
-          <el-switch v-model="autoRefresh" active-text="自动刷新(5s)" size="small" @change="onAutoRefreshToggle" />
-        </el-form-item>
       </el-form>
       <el-table :data="logs" v-loading="logsLoading" stripe size="small" @sort-change="onSortChange">
         <el-table-column prop="id" label="ID" width="70" />
@@ -390,7 +387,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Refresh, Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -423,8 +420,6 @@ const logTotal = ref(0)
 const logCurrentPage = ref(1)
 const logPageSize = ref(20)
 const logsLoading = ref(false)
-const autoRefresh = ref(true)
-let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 const filters = reactive({
   model: '',
@@ -627,10 +622,6 @@ async function searchLogs() {
 function applyFilters() { logCurrentPage.value = 1; searchLogs() }
 function onLogPageSizeChange() { logCurrentPage.value = 1; searchLogs() }
 function onLogPageChange() { searchLogs() }
-function onAutoRefreshToggle(val: boolean) {
-  if (val) { autoRefreshTimer = setInterval(searchLogs, 5000) }
-  else { if (autoRefreshTimer) clearInterval(autoRefreshTimer) }
-}
 function onSortChange({ prop, order }: any) {
   if (!prop) return
   sortOrder.field = prop.replace(/([A-Z])/g, '_$1').toLowerCase()
@@ -968,11 +959,6 @@ onMounted(() => {
   } else {
     loadApps()
   }
-  if (autoRefresh.value) autoRefreshTimer = setInterval(searchLogs, 5000)
-})
-
-onUnmounted(() => {
-  if (autoRefreshTimer) clearInterval(autoRefreshTimer)
 })
 </script>
 

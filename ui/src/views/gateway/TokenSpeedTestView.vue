@@ -365,8 +365,8 @@ async function runTest() {
         report.value = data
         testPercent.value = 100
         testProgressMessage.value = '测速完成'
-        if (!data.average?.ok) {
-          ElMessage.warning(data.average?.error || '测速未成功完成')
+        if (!(data.average as { ok?: boolean } | undefined)?.ok) {
+          ElMessage.warning((data.average as { error?: string } | undefined)?.error || '测速未成功完成')
         }
       } else if (event === 'error') {
         const detail = typeof data.detail === 'string' ? data.detail : '测速失败'

@@ -10,6 +10,7 @@ import VideoToolsConfigView from '../views/video_tools/VideoToolsConfigView.vue'
 import VoiceToTextView from '../views/video_tools/VoiceToTextView.vue'
 import MdToDocxView from '../views/doc_tools/MdToDocxView.vue'
 import MdHeadingNumberingView from '../views/doc_tools/MdHeadingNumberingView.vue'
+import MdReaderView from '../views/doc_tools/MdReaderView.vue'
 import SettingsView from '../views/settings/SettingsView.vue'
 
 const routes = [
@@ -35,6 +36,7 @@ const routes = [
         name: 'docToolsMdHeadingNumbering',
         component: MdHeadingNumberingView,
       },
+      { path: 'doc-tools/md-reader', name: 'docToolsMdReader', component: MdReaderView },
       { path: 'settings', name: 'settings', component: SettingsView },
     ],
   },

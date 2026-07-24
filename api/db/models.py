@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import Column, LargeBinary, Text
 from sqlmodel import Field, SQLModel
 
 
@@ -75,3 +76,32 @@ class SpyLookPublicModelRoute(SQLModel, table=True):
     upstream_model: str
     sort_order: int = Field(default=0)
     enabled: bool = Field(default=True)
+
+
+class SpyLookMdDocument(SQLModel, table=True):
+    __tablename__ = "spy_look_md_documents"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(default="未命名.md", index=True)
+    content: str = Field(default="", sa_column=Column(Text, nullable=False))
+    content_bytes: int = Field(default=0)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookMdDocumentImage(SQLModel, table=True):
+    __tablename__ = "spy_look_md_document_images"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    document_id: int = Field(foreign_key="spy_look_md_documents.id", index=True)
+    filename: str = Field(default="image.png")
+    content_type: str = Field(default="image/png")
+    data: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookMdRecentOpen(SQLModel, table=True):
+    __tablename__ = "spy_look_md_recent_opens"
+
+    document_id: int = Field(primary_key=True, foreign_key="spy_look_md_documents.id")
+    opened_at: datetime = Field(default_factory=datetime.utcnow, index=True)

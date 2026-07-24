@@ -5,12 +5,18 @@
 
 json_mode 探测等价于 SDK 的 completions.parse(response_format=PydanticModel)：
 由 Pydantic 生成 json_schema 请求体，响应用 model_validate_json 校验。
+
+vision 探测发送内嵌纯色 PNG（image_url data URL），要求模型识别主色，
+以验证是否支持多模态图片理解。
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import re
+import struct
+import zlib
 from typing import Any
 
 import httpx
@@ -104,6 +110,23 @@ def _first_message(data: dict[str, Any]) -> dict[str, Any]:
     if not choices:
         return {}
     return choices[0].get("message") or {}
+
+
+def _message_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return ""
 
 
 def _detect_thinking_in_message(message: dict[str, Any]) -> tuple[bool, str | None]:
@@ -395,6 +418,135 @@ def _test_thinking(
     )
 
 
+def _solid_color_png(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
+    r, g, b = rgb
+    raw = b"".join(b"\x00" + bytes([r, g, b]) * width for _ in range(height))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+_VISION_PROBE_RGB = (220, 20, 60)  # crimson red
+_VISION_PROBE_PNG_B64 = base64.b64encode(_solid_color_png(64, 64, _VISION_PROBE_RGB)).decode("ascii")
+_VISION_PROBE_DATA_URL = f"data:image/png;base64,{_VISION_PROBE_PNG_B64}"
+_VISION_PROBE_PROMPT = (
+    "What is the dominant color of this image? "
+    "Reply with exactly one word in English: red, green, blue, yellow, or other."
+)
+_VISION_REJECT_HINTS = (
+    "image",
+    "vision",
+    "multimodal",
+    "multi-modal",
+    "image_url",
+    "does not support",
+    "not support",
+    "unsupported",
+    "only text",
+    "text-only",
+    "无法处理",
+    "不支持",
+    "图片",
+    "多模态",
+)
+
+
+def _content_mentions_red(text: str) -> bool:
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("red", "crimson", "scarlet")):
+        return True
+    return any(marker in text for marker in ("红色", "赤色", "红"))
+
+
+def _looks_like_vision_rejection(status: int, err: str) -> bool:
+    if status not in (400, 404, 415, 422):
+        return False
+    lowered = err.lower()
+    return any(hint in lowered for hint in _VISION_REJECT_HINTS)
+
+
+def _test_vision(
+    client: httpx.Client,
+    url: str,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+) -> dict[str, Any]:
+    body = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _VISION_PROBE_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": _VISION_PROBE_DATA_URL},
+                    },
+                ],
+            }
+        ],
+        "max_tokens": max_tokens,
+        "stream": False,
+        **_thinking_options(False),
+    }
+    status, data, err = _post_chat(client, url, api_key, body)
+    if err:
+        return _capability_result(
+            supported=False,
+            error=err,
+            status_code=status,
+            param_rejected=_looks_like_vision_rejection(status, err),
+            mode="image_url",
+        )
+
+    message = _first_message(data)
+    content = _message_text(message).strip()
+    finish_reason = (data.get("choices") or [{}])[0].get("finish_reason")
+    if not content:
+        return _capability_result(
+            supported=False,
+            detail="响应无有效 content",
+            status_code=status,
+            finish_reason=finish_reason,
+            mode="image_url",
+        )
+
+    if _content_mentions_red(content):
+        return _capability_result(
+            supported=True,
+            detail=f"模型识别出图片主色为红色: {content[:120]}",
+            status_code=status,
+            finish_reason=finish_reason,
+            content_preview=content[:200],
+            mode="image_url",
+            expected_color="red",
+        )
+
+    return _capability_result(
+        supported=False,
+        detail="请求成功，但回复未正确识别出红色图片",
+        status_code=status,
+        finish_reason=finish_reason,
+        content_preview=content[:200],
+        mode="image_url",
+        expected_color="red",
+    )
+
+
 def probe_model_capabilities(
     uri: str,
     api_key: str,
@@ -415,13 +567,16 @@ def probe_model_capabilities(
         result["chat_completion"] = chat
 
         if not chat["supported"]:
-            result["tool_calling"] = _capability_result(supported=False, detail="跳过：基础对话不可用")
-            result["json_mode"] = _capability_result(supported=False, detail="跳过：基础对话不可用")
-            result["thinking"] = _capability_result(supported=False, detail="跳过：基础对话不可用")
+            skip = _capability_result(supported=False, detail="跳过：基础对话不可用")
+            result["tool_calling"] = skip
+            result["json_mode"] = skip
+            result["thinking"] = skip
+            result["vision"] = skip
             return result
 
         result["tool_calling"] = _test_tool_calling(client, url, api_key, model, max_tokens)
         result["json_mode"] = _test_json_mode(client, url, api_key, model, max_tokens)
         result["thinking"] = _test_thinking(client, url, api_key, model, max_tokens)
+        result["vision"] = _test_vision(client, url, api_key, model, max_tokens)
 
     return result

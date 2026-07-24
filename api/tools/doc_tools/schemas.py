@@ -112,3 +112,13 @@ class MdHeadingNumberingRequest(BaseModel):
         default=None,
         description="标题编号配置；省略则使用默认",
     )
+
+
+class MdDocumentCreateRequest(BaseModel):
+    title: str | None = Field(default=None, description="文档标题；省略则用未命名.md")
+    content: str = Field(default="", description="Markdown 正文")
+
+
+class MdDocumentUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, description="重命名标题")
+    content: str | None = Field(default=None, description="更新正文（自动保存）")
