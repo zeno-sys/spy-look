@@ -11,6 +11,9 @@ import VoiceToTextView from '../views/video_tools/VoiceToTextView.vue'
 import MdToDocxView from '../views/doc_tools/MdToDocxView.vue'
 import MdHeadingNumberingView from '../views/doc_tools/MdHeadingNumberingView.vue'
 import MdReaderView from '../views/doc_tools/MdReaderView.vue'
+import ImageOcrView from '../views/image_tools/ImageOcrView.vue'
+import ImageFormulaView from '../views/image_tools/ImageFormulaView.vue'
+import ImageLayoutView from '../views/image_tools/ImageLayoutView.vue'
 import SettingsView from '../views/settings/SettingsView.vue'
 
 const routes = [
@@ -37,6 +40,10 @@ const routes = [
         component: MdHeadingNumberingView,
       },
       { path: 'doc-tools/md-reader', name: 'docToolsMdReader', component: MdReaderView },
+      { path: 'image-tools', redirect: '/image-tools/ocr' },
+      { path: 'image-tools/ocr', name: 'imageToolsOcr', component: ImageOcrView },
+      { path: 'image-tools/formula', name: 'imageToolsFormula', component: ImageFormulaView },
+      { path: 'image-tools/layout', name: 'imageToolsLayout', component: ImageLayoutView },
       { path: 'settings', name: 'settings', component: SettingsView },
     ],
   },

@@ -72,4 +72,21 @@ export const tools: ToolDefinition[] = [
       { path: '/doc-tools/md-reader', title: 'MD 编辑器' },
     ],
   },
+  {
+    id: 'image-tools',
+    title: '图片工具',
+    description: '图片处理：本地 OCR、公式识别、版面识别等。',
+    icon: 'Picture',
+    accent: {
+      gradient: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+      surface: 'linear-gradient(160deg, #fff7ed 0%, #ffedd5 100%)',
+      iconColor: '#c2410c',
+    },
+    homePath: '/image-tools/ocr',
+    menuItems: [
+      { path: '/image-tools/ocr', title: '图片 OCR' },
+      { path: '/image-tools/formula', title: '公式识别' },
+      { path: '/image-tools/layout', title: '版面识别' },
+    ],
+  },
 ]

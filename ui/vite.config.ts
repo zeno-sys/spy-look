@@ -19,6 +19,7 @@ export default defineConfig({
       '/gateway/logs': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/video-tools/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/doc-tools/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/image-tools/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/settings/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/healthz': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
