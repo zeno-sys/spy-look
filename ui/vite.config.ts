@@ -15,6 +15,7 @@ export default defineConfig({
     // changeOrigin helps when traffic comes through peanut-shell Host headers
     proxy: {
       '/v1': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/auth': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/gateway/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/gateway/logs': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/video-tools/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },

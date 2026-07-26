@@ -145,3 +145,28 @@ class SpyLookAgentSkillTagLink(SQLModel, table=True):
 
     skill_id: int = Field(primary_key=True, foreign_key="spy_look_agent_skills.id")
     tag_id: int = Field(primary_key=True, foreign_key="spy_look_agent_skill_tags.id", index=True)
+
+
+class SpyLookUser(SQLModel, table=True):
+    __tablename__ = "spy_look_users"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(unique=True, index=True)
+    password_hash: str
+    role: str = Field(default="admin", index=True)  # owner | admin
+    disabled: bool = Field(default=False)
+    failed_login_count: int = Field(default=0)
+    locked_until: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookSession(SQLModel, table=True):
+    __tablename__ = "spy_look_sessions"
+
+    id: str = Field(primary_key=True)  # session token
+    user_id: int = Field(foreign_key="spy_look_users.id", index=True)
+    expires_at: datetime = Field(index=True)
+    remember: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_seen_at: datetime = Field(default_factory=datetime.utcnow)

@@ -1,5 +1,17 @@
 const BASE = ''
 
+const defaultFetchInit: RequestInit = {
+  credentials: 'include',
+}
+
+async function readErrorMessage(res: Response): Promise<string> {
+  const err = await res.json().catch(() => ({ detail: res.statusText }))
+  if (typeof err.detail === 'string') return err.detail
+  if (err.error?.message) return String(err.error.message)
+  if (err.detail != null) return JSON.stringify(err.detail)
+  return res.statusText || '请求失败'
+}
+
 export async function apiGet<T = any>(path: string, params?: Record<string, any>): Promise<T> {
   const url = new URL(BASE + path, window.location.origin)
   if (params) {
@@ -7,23 +19,22 @@ export async function apiGet<T = any>(path: string, params?: Record<string, any>
       if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v))
     })
   }
-  const res = await fetch(url.toString())
+  const res = await fetch(url.toString(), { ...defaultFetchInit })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
+    throw new Error(await readErrorMessage(res))
   }
   return res.json()
 }
 
 export async function apiPost<T = any>(path: string, body?: any): Promise<T> {
   const res = await fetch(BASE + path, {
+    ...defaultFetchInit,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
+    throw new Error(await readErrorMessage(res))
   }
   return res.json()
 }
@@ -31,6 +42,7 @@ export async function apiPost<T = any>(path: string, body?: any): Promise<T> {
 export async function apiPatch<T = any>(path: string, body?: any): Promise<T> {
   // Use POST: peanut-shell / some WAFs drop PATCH and return ERR_EMPTY_RESPONSE
   const res = await fetch(BASE + path, {
+    ...defaultFetchInit,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -39,17 +51,15 @@ export async function apiPatch<T = any>(path: string, body?: any): Promise<T> {
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
+    throw new Error(await readErrorMessage(res))
   }
   return res.json()
 }
 
 export async function apiDelete<T = any>(path: string): Promise<T> {
-  const res = await fetch(BASE + path, { method: 'DELETE' })
+  const res = await fetch(BASE + path, { ...defaultFetchInit, method: 'DELETE' })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
+    throw new Error(await readErrorMessage(res))
   }
   return res.json()
 }
@@ -73,13 +83,6 @@ function filenameFromDisposition(header: string | null): string | null {
   return plain?.[2]?.trim() || null
 }
 
-async function readErrorMessage(res: Response): Promise<string> {
-  const err = await res.json().catch(() => ({ detail: res.statusText }))
-  if (typeof err.detail === 'string') return err.detail
-  if (err.error?.message) return String(err.error.message)
-  return JSON.stringify(err.detail ?? err)
-}
-
 /** GET 并下载二进制响应（如 zip） */
 export async function apiDownloadGet(
   path: string,
@@ -92,7 +95,7 @@ export async function apiDownloadGet(
       if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v))
     })
   }
-  const res = await fetch(url.toString())
+  const res = await fetch(url.toString(), { ...defaultFetchInit })
   if (!res.ok) {
     throw new Error(await readErrorMessage(res))
   }
@@ -110,6 +113,7 @@ export async function apiDownloadPost(
 ): Promise<DownloadResult> {
   const isFormData = body instanceof FormData
   const res = await fetch(BASE + path, {
+    ...defaultFetchInit,
     method: 'POST',
     headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
     body: isFormData ? body : JSON.stringify(body),
@@ -132,13 +136,13 @@ export async function apiStreamPost(
 ): Promise<void> {
   const isFormData = body instanceof FormData
   const res = await fetch(BASE + path, {
+    ...defaultFetchInit,
     method: 'POST',
     headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
     body: isFormData ? body : JSON.stringify(body),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
+    throw new Error(await readErrorMessage(res))
   }
   if (!res.body) {
     throw new Error('响应不支持流式读取')

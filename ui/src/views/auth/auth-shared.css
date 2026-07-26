@@ -1,0 +1,65 @@
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 0%, rgba(254, 240, 138, 0.45), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 100%, rgba(253, 230, 138, 0.35), transparent 50%),
+    var(--sl-bg);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--sl-bg-elevated);
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-lg);
+  box-shadow: var(--sl-shadow-lg);
+  padding: 32px 28px 28px;
+}
+
+.auth-brand {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.auth-logo {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 14px;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #eab308, #c27803);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 18px rgba(194, 120, 3, 0.28);
+}
+
+.auth-logo svg {
+  width: 26px;
+  height: 26px;
+}
+
+.auth-brand h1 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--sl-text);
+  margin-bottom: 6px;
+}
+
+.auth-brand p {
+  font-size: 0.9rem;
+  color: var(--sl-text-muted);
+  line-height: 1.5;
+}
+
+.auth-error {
+  margin-bottom: 14px;
+}
+
+.auth-submit {
+  width: 100%;
+  margin-top: 4px;
+}

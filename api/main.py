@@ -11,6 +11,8 @@ from config import UI_DIR
 from db.engine import init_db
 from errors import openai_error_response
 from tools.agent_resources.router import router as agent_resources_router
+from tools.auth.middleware import ConsoleAuthMiddleware
+from tools.auth.router import router as auth_router
 from tools.doc_tools.router import router as doc_tools_router
 from tools.gateway.router import router as gateway_tool_router
 from tools.image_tools.router import router as image_tools_router
@@ -44,10 +46,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Spy-Look", description="个人工具合集", version="0.2.0", lifespan=lifespan)
+app.add_middleware(ConsoleAuthMiddleware)
 
 if UI_DIR.exists():
     app.mount("/assets", StaticFiles(directory=UI_DIR / "assets"), name="assets")
 
+app.include_router(auth_router)
 app.include_router(gateway_tool_router)
 app.include_router(video_tools_router)
 app.include_router(doc_tools_router)
@@ -75,9 +79,13 @@ async def serve_spa(full_path: str = ""):
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     if isinstance(exc.detail, dict) and "error" in exc.detail:
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    # 控制台 /auth 与管理接口使用标准 detail，便于前端展示中文错误
+    path = request.url.path
+    if path.startswith("/auth/") or not path.startswith("/v1"):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     return openai_error_response(
         message=str(exc.detail),
         status_code=exc.status_code,

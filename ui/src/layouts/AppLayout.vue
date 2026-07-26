@@ -40,6 +40,10 @@
         </el-sub-menu>
       </el-menu>
       <div class="sidebar-footer">
+        <div v-show="!sidebarCollapsed" class="sidebar-user">
+          <div class="sidebar-user-name">{{ user?.username || '—' }}</div>
+          <div class="sidebar-user-role">{{ user?.role === 'owner' ? 'Owner' : 'Admin' }}</div>
+        </div>
         <el-menu
           :default-active="activeMenu"
           :collapse="sidebarCollapsed"
@@ -47,11 +51,24 @@
           router
           class="sidebar-footer-menu"
         >
+          <el-menu-item v-if="isOwner" index="/settings/users">
+            <el-icon><User /></el-icon>
+            <template #title>用户管理</template>
+          </el-menu-item>
           <el-menu-item index="/settings">
             <el-icon><Setting /></el-icon>
             <template #title>设置</template>
           </el-menu-item>
         </el-menu>
+        <button
+          type="button"
+          class="sidebar-collapse-btn"
+          title="退出登录"
+          @click="onLogout"
+        >
+          <el-icon :size="16"><SwitchButton /></el-icon>
+          <span v-show="!sidebarCollapsed">退出登录</span>
+        </button>
         <button
           type="button"
           class="sidebar-collapse-btn"
@@ -74,13 +91,17 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { Expand, Fold, HomeFilled, Setting } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { Expand, Fold, HomeFilled, Setting, SwitchButton, User } from '@element-plus/icons-vue'
 import { tools } from '../config/tools'
+import { useAuth } from '../composables/useAuth'
 
 const SIDEBAR_KEY = 'spy-look-sidebar-collapsed'
 
 const route = useRoute()
+const router = useRouter()
+const { user, isOwner, logout } = useAuth()
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_KEY) === '1')
 
 watch(sidebarCollapsed, (v) => {
@@ -91,9 +112,19 @@ function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
 }
 
+async function onLogout() {
+  try {
+    await logout()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '退出失败')
+  }
+  await router.replace('/login')
+}
+
 const activeMenu = computed(() => {
   const path = route.path
   if (path === '/') return '/'
+  if (path === '/settings/users') return '/settings/users'
   if (path === '/settings' || path.startsWith('/settings/')) return '/settings'
   for (const tool of tools) {
     for (const item of tool.menuItems) {
@@ -105,3 +136,24 @@ const activeMenu = computed(() => {
   return path
 })
 </script>
+
+<style scoped>
+.sidebar-user {
+  padding: 10px 16px 4px;
+}
+
+.sidebar-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sl-sidebar-text-active);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user-role {
+  font-size: 11px;
+  color: var(--sl-sidebar-text);
+  margin-top: 2px;
+}
+</style>

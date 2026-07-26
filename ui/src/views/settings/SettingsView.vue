@@ -111,6 +111,47 @@
             </el-form>
           </el-card>
         </el-tab-pane>
+
+        <el-tab-pane label="账号安全" name="security">
+          <el-card class="section-card">
+            <template #header><span>修改密码</span></template>
+            <p class="hint" style="margin-bottom:16px">
+              修改成功后当前会话将失效，需使用新密码重新登录。用户名不可修改。
+            </p>
+            <el-form :model="passwordForm" label-position="top" style="max-width:420px">
+              <el-form-item label="当前密码">
+                <el-input
+                  v-model="passwordForm.current"
+                  type="password"
+                  show-password
+                  autocomplete="current-password"
+                />
+              </el-form-item>
+              <el-form-item label="新密码">
+                <el-input
+                  v-model="passwordForm.next"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  placeholder="至少 8 位"
+                />
+              </el-form-item>
+              <el-form-item label="确认新密码">
+                <el-input
+                  v-model="passwordForm.confirm"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="changingPassword" @click="submitChangePassword">
+                  修改密码
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </el-tab-pane>
       </el-tabs>
     </div>
 
@@ -156,8 +197,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { apiGet, apiPatch, apiPost } from '../../composables/useApi'
+import { useAuth } from '../../composables/useAuth'
 
 interface UpstreamOption {
   id: number
@@ -177,10 +220,44 @@ interface TestResult {
   body?: unknown
 }
 
+const router = useRouter()
+const { changePassword, refreshStatus } = useAuth()
+
 const activeTab = ref('llm')
 const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
+const changingPassword = ref(false)
+const passwordForm = reactive({
+  current: '',
+  next: '',
+  confirm: '',
+})
+
+async function submitChangePassword() {
+  if (!passwordForm.current || passwordForm.next.length < 8) {
+    ElMessage.warning('请填写当前密码，且新密码至少 8 位')
+    return
+  }
+  if (passwordForm.next !== passwordForm.confirm) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+  changingPassword.value = true
+  try {
+    await changePassword(passwordForm.current, passwordForm.next)
+    ElMessage.success('密码已修改，请重新登录')
+    passwordForm.current = ''
+    passwordForm.next = ''
+    passwordForm.confirm = ''
+    await refreshStatus()
+    await router.replace('/login')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '修改失败')
+  } finally {
+    changingPassword.value = false
+  }
+}
 const modelsLoading = ref(false)
 const maskedApiKey = ref('')
 const upstreamOptions = ref<UpstreamOption[]>([])
