@@ -89,4 +89,17 @@ export const tools: ToolDefinition[] = [
       { path: '/image-tools/layout', title: '版面识别' },
     ],
   },
+  {
+    id: 'agent-resources',
+    title: 'Agent 资源',
+    description: '持久化管理 Agent Skills 等资源：导入、标签筛选、版本与 zip 导出。',
+    icon: 'Collection',
+    accent: {
+      gradient: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+      surface: 'linear-gradient(160deg, #f0f9ff 0%, #e0f2fe 100%)',
+      iconColor: '#0369a1',
+    },
+    homePath: '/agent-resources/skills',
+    menuItems: [{ path: '/agent-resources/skills', title: 'Skills 管理' }],
+  },
 ]

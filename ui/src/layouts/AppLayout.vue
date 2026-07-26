@@ -15,7 +15,7 @@
       </div>
       <el-menu
         :default-active="activeMenu"
-        :default-openeds="['gateway', 'video-tools', 'doc-tools', 'image-tools']"
+        :default-openeds="[]"
         :collapse="sidebarCollapsed"
         :collapse-transition="false"
         router

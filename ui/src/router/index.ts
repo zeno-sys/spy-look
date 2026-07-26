@@ -15,6 +15,7 @@ import ImageOcrView from '../views/image_tools/ImageOcrView.vue'
 import ImageFormulaView from '../views/image_tools/ImageFormulaView.vue'
 import ImageLayoutView from '../views/image_tools/ImageLayoutView.vue'
 import SettingsView from '../views/settings/SettingsView.vue'
+import SkillsManageView from '../views/agent_resources/SkillsManageView.vue'
 
 const routes = [
   {
@@ -45,6 +46,12 @@ const routes = [
       { path: 'image-tools/formula', name: 'imageToolsFormula', component: ImageFormulaView },
       { path: 'image-tools/layout', name: 'imageToolsLayout', component: ImageLayoutView },
       { path: 'settings', name: 'settings', component: SettingsView },
+      { path: 'agent-resources', redirect: '/agent-resources/skills' },
+      {
+        path: 'agent-resources/skills',
+        name: 'agentResourcesSkills',
+        component: SkillsManageView,
+      },
     ],
   },
 ]

@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from config import UI_DIR
 from db.engine import init_db
 from errors import openai_error_response
+from tools.agent_resources.router import router as agent_resources_router
 from tools.doc_tools.router import router as doc_tools_router
 from tools.gateway.router import router as gateway_tool_router
 from tools.image_tools.router import router as image_tools_router
@@ -51,6 +52,7 @@ app.include_router(gateway_tool_router)
 app.include_router(video_tools_router)
 app.include_router(doc_tools_router)
 app.include_router(image_tools_router)
+app.include_router(agent_resources_router)
 app.include_router(settings_router)
 
 

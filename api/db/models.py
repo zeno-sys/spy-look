@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, LargeBinary, Text
+from sqlalchemy import Column, LargeBinary, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -105,3 +105,43 @@ class SpyLookMdRecentOpen(SQLModel, table=True):
 
     document_id: int = Field(primary_key=True, foreign_key="spy_look_md_documents.id")
     opened_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class SpyLookAgentSkill(SQLModel, table=True):
+    __tablename__ = "spy_look_agent_skills"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+    description: str = Field(default="", sa_column=Column(Text, nullable=False))
+    current_version: int = Field(default=1)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookAgentSkillVersion(SQLModel, table=True):
+    __tablename__ = "spy_look_agent_skill_versions"
+    __table_args__ = (UniqueConstraint("skill_id", "version", name="uq_agent_skill_version"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    skill_id: int = Field(foreign_key="spy_look_agent_skills.id", index=True)
+    version: int
+    changelog: str = Field(default="", sa_column=Column(Text, nullable=False))
+    package_zip: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    size_bytes: int = Field(default=0)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookAgentSkillTag(SQLModel, table=True):
+    __tablename__ = "spy_look_agent_skill_tags"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+    color: str = Field(default="#64748b")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookAgentSkillTagLink(SQLModel, table=True):
+    __tablename__ = "spy_look_agent_skill_tag_links"
+
+    skill_id: int = Field(primary_key=True, foreign_key="spy_look_agent_skills.id")
+    tag_id: int = Field(primary_key=True, foreign_key="spy_look_agent_skill_tags.id", index=True)

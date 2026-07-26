@@ -80,6 +80,28 @@ async function readErrorMessage(res: Response): Promise<string> {
   return JSON.stringify(err.detail ?? err)
 }
 
+/** GET 并下载二进制响应（如 zip） */
+export async function apiDownloadGet(
+  path: string,
+  params?: Record<string, any>,
+  fallbackFilename = 'download.bin',
+): Promise<DownloadResult> {
+  const url = new URL(BASE + path, window.location.origin)
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v))
+    })
+  }
+  const res = await fetch(url.toString())
+  if (!res.ok) {
+    throw new Error(await readErrorMessage(res))
+  }
+  const blob = await res.blob()
+  const filename =
+    filenameFromDisposition(res.headers.get('Content-Disposition')) || fallbackFilename
+  return { blob, filename }
+}
+
 /** POST 并下载二进制响应（如 DOCX） */
 export async function apiDownloadPost(
   path: string,
