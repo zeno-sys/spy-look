@@ -376,21 +376,37 @@
         <div class="bm-group-list">
           <div v-for="g in groups" :key="g.id" class="bm-group-row">
             <el-icon><FolderOpened /></el-icon>
-            <el-input
-              v-model="g.name"
-              size="small"
-              class="bm-group-edit-name"
-              @change="onUpdateGroup(g)"
-            />
-            <span class="bm-group-edit-count">{{ g.bookmark_count ?? 0 }} 个书签</span>
-            <el-button
-              size="small"
-              :icon="Delete"
-              circle
-              :disabled="(g.bookmark_count ?? 0) > 0"
-              :title="(g.bookmark_count ?? 0) > 0 ? '请先清空分组内书签' : '删除分组'"
-              @click="onDeleteGroup(g)"
-            />
+            <template v-if="editingGroupId === g.id">
+              <el-input
+                ref="editInputRef"
+                v-model="editName"
+                size="small"
+                class="bm-group-edit-name"
+                @keyup.enter="onConfirmEdit(g)"
+                @keyup.escape="onCancelEdit(g)"
+              />
+              <el-button :icon="Check" size="small" circle type="primary" @click="onConfirmEdit(g)" />
+              <el-button :icon="Close" size="small" circle @click="onCancelEdit(g)" />
+            </template>
+            <template v-else>
+              <span class="bm-group-name-text">{{ g.name }}</span>
+              <span class="bm-group-edit-count">{{ g.bookmark_count ?? 0 }} 个书签</span>
+              <el-button
+                size="small"
+                :icon="EditPen"
+                circle
+                title="重命名"
+                @click="onStartEdit(g)"
+              />
+              <el-button
+                size="small"
+                :icon="Delete"
+                circle
+                :disabled="(g.bookmark_count ?? 0) > 0"
+                :title="(g.bookmark_count ?? 0) > 0 ? '请先清空分组内书签' : '删除分组'"
+                @click="onDeleteGroup(g)"
+              />
+            </template>
           </div>
           <div v-if="!groups.length" class="bm-empty-mini">暂无分组</div>
         </div>
@@ -400,12 +416,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Link,
   Delete,
   EditPen,
+  Check,
+  Close,
   Files,
   FolderAdd,
   FolderOpened,
@@ -484,6 +502,11 @@ function toggleTagFilter(tagId: number) {
   } else {
     selectedTagIds.value.push(tagId)
   }
+  refreshBookmarks()
+}
+
+function clearTagFilter() {
+  selectedTagIds.value = []
   refreshBookmarks()
 }
 
@@ -716,6 +739,38 @@ const groupDialogVisible = ref(false)
 const groupCreating = ref(false)
 const newGroupForm = ref({ name: '' })
 
+// Edit group in place
+const editingGroupId = ref<number | null>(null)
+const editName = ref('')
+const editInputRef = ref()
+
+function onStartEdit(g: GroupItem) {
+  editingGroupId.value = g.id
+  editName.value = g.name
+  nextTick(() => {
+    editInputRef.value?.focus?.()
+  })
+}
+
+async function onConfirmEdit(g: GroupItem) {
+  if (!editName.value.trim()) return
+  try {
+    await updateGroup(g.id, { name: editName.value })
+    g.name = editName.value
+    editingGroupId.value = null
+    ElMessage.success('分组已更新')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '更新失败')
+    await listGroups()
+    editingGroupId.value = null
+  }
+}
+
+function onCancelEdit(g: GroupItem) {
+  editingGroupId.value = null
+  editName.value = ''
+}
+
 async function onCreateGroup() {
   if (!newGroupForm.value.name.trim()) return
   groupCreating.value = true
@@ -727,16 +782,6 @@ async function onCreateGroup() {
     ElMessage.error(e?.message || '创建失败')
   } finally {
     groupCreating.value = false
-  }
-}
-
-async function onUpdateGroup(g: GroupItem) {
-  try {
-    await updateGroup(g.id, { name: g.name })
-    ElMessage.success('分组已更新')
-  } catch (e: any) {
-    ElMessage.error(e?.message || '更新失败')
-    await listGroups()
   }
 }
 
@@ -952,7 +997,7 @@ onMounted(() => {
 /* Tag filter */
 .bm-tag-filter-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .bm-tag-chip {
-  padding: 3px 10px;
+  padding: 3px 10px 3px 8px;
   border: 1px solid var(--sl-border);
   border-radius: 12px;
   background: none;
@@ -960,12 +1005,27 @@ onMounted(() => {
   font-size: 12px;
   color: var(--sl-text-secondary);
   transition: all 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.bm-tag-chip::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tag-color, #94a3b8);
+  flex-shrink: 0;
+  display: inline-block;
 }
 .bm-tag-chip:hover { border-color: var(--tag-color, var(--sl-accent-border)); }
 .bm-tag-chip.active {
   background: var(--tag-color, var(--sl-accent));
   border-color: var(--tag-color, var(--sl-accent));
   color: #fff;
+}
+.bm-tag-chip.active::before {
+  background: #fff;
 }
 
 /* Right main */
@@ -1143,6 +1203,7 @@ onMounted(() => {
 .bm-group-list { display: flex; flex-direction: column; gap: 8px; }
 .bm-group-row { display: flex; align-items: center; gap: 8px; }
 .bm-group-row > .el-icon { color: var(--sl-text-muted); }
+.bm-group-name-text { flex: 1; font-size: 14px; color: var(--sl-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bm-group-edit-name { flex: 1; }
 .bm-group-edit-count { font-size: 12px; color: var(--sl-text-muted); white-space: nowrap; }
 

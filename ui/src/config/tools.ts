@@ -105,7 +105,7 @@ export const tools: ToolDefinition[] = [
   {
     id: 'bookmarks',
     title: '网页收藏',
-    description: '统一管理浏览器书签：分组、标签、置顶、搜索，7 日高频 TOP5。',
+    description: '书签管理、稍后阅读、网页剪藏快照，统一收藏与管理。',
     icon: 'CollectionTag',
     accent: {
       gradient: 'linear-gradient(135deg, #0891b2 0%, #0e7490 100%)',
@@ -113,6 +113,10 @@ export const tools: ToolDefinition[] = [
       iconColor: '#0e7490',
     },
     homePath: '/bookmarks/manage',
-    menuItems: [{ path: '/bookmarks/manage', title: '书签管理' }],
+    menuItems: [
+      { path: '/bookmarks/manage', title: '书签管理' },
+      { path: '/bookmarks/read-later', title: '稍后阅读' },
+      { path: '/bookmarks/web-clips', title: '剪藏快照' },
+    ],
   },
 ]

@@ -225,3 +225,40 @@ class SpyLookBookmarkAccessLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     bookmark_id: int = Field(foreign_key="spy_look_bookmarks.id", index=True)
     accessed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+# --------------------------------------------------------------------------- #
+# Read Later
+# --------------------------------------------------------------------------- #
+
+class SpyLookReadLater(SQLModel, table=True):
+    __tablename__ = "spy_look_read_later"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    url: str = Field(unique=True, index=True)
+    title: str = Field(default="", index=True)
+    summary: str = Field(default="", sa_column=Column(Text, nullable=False))
+    status: str = Field(default="pending", index=True)  # pending | read | archived
+    bookmark_id: Optional[int] = Field(
+        default=None, foreign_key="spy_look_bookmarks.id", index=True
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# --------------------------------------------------------------------------- #
+# Web Clips (clipper + snapshot)
+# --------------------------------------------------------------------------- #
+
+class SpyLookWebClip(SQLModel, table=True):
+    __tablename__ = "spy_look_web_clips"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    url: str = Field(index=True)
+    title: str = Field(default="")
+    content_md: str = Field(default="", sa_column=Column(Text, nullable=False))
+    content_html: str = Field(default="", sa_column=Column(Text, nullable=False))
+    bookmark_id: Optional[int] = Field(
+        default=None, foreign_key="spy_look_bookmarks.id", index=True
+    )
+    fetched_at: datetime = Field(default_factory=datetime.utcnow)

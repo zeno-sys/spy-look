@@ -17,6 +17,8 @@ import ImageLayoutView from '../views/image_tools/ImageLayoutView.vue'
 import SettingsView from '../views/settings/SettingsView.vue'
 import SkillsManageView from '../views/agent_resources/SkillsManageView.vue'
 import BookmarksManageView from '../views/bookmarks/BookmarksManageView.vue'
+import ReadLaterView from '../views/read_later/ReadLaterView.vue'
+import WebClipsView from '../views/web_clips/WebClipsView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 import SetupView from '../views/auth/SetupView.vue'
 import LocalResetView from '../views/auth/LocalResetView.vue'
@@ -87,6 +89,16 @@ const routes = [
         path: 'bookmarks/manage',
         name: 'bookmarksManage',
         component: BookmarksManageView,
+      },
+      {
+        path: 'bookmarks/read-later',
+        name: 'bookmarksReadLater',
+        component: ReadLaterView,
+      },
+      {
+        path: 'bookmarks/web-clips',
+        name: 'bookmarksWebClips',
+        component: WebClipsView,
       },
     ],
   },

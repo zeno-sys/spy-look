@@ -27,4 +27,5 @@ dependencies = [
     "ftfy>=6.3.1",
     "tokenizers>=0.23.1",
     "bcrypt>=5.0.0",
+    "html2text>=2024.2.0",
 ]

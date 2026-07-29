@@ -17,8 +17,10 @@ from tools.bookmarks.router import router as bookmarks_router
 from tools.doc_tools.router import router as doc_tools_router
 from tools.gateway.router import router as gateway_tool_router
 from tools.image_tools.router import router as image_tools_router
+from tools.read_later.router import router as read_later_router
 from tools.settings.router import router as settings_router
 from tools.video_tools.router import router as video_tools_router
+from tools.web_clips.router import router as web_clips_router
 
 
 @asynccontextmanager
@@ -72,6 +74,8 @@ app.include_router(image_tools_router)
 app.include_router(agent_resources_router)
 app.include_router(settings_router)
 app.include_router(bookmarks_router)
+app.include_router(read_later_router)
+app.include_router(web_clips_router)
 
 
 @app.get("/healthz")
