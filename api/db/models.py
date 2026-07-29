@@ -170,3 +170,58 @@ class SpyLookSession(SQLModel, table=True):
     remember: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_seen_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# --------------------------------------------------------------------------- #
+# Bookmarks
+# --------------------------------------------------------------------------- #
+
+class SpyLookBookmarkGroup(SQLModel, table=True):
+    __tablename__ = "spy_look_bookmark_groups"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookBookmark(SQLModel, table=True):
+    __tablename__ = "spy_look_bookmarks"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    url: str = Field(unique=True, index=True)
+    title: str = Field(default="", index=True)
+    favicon_url: str = Field(default="")
+    group_id: Optional[int] = Field(
+        default=None, foreign_key="spy_look_bookmark_groups.id", index=True
+    )
+    pinned: bool = Field(default=False, index=True)
+    access_count: int = Field(default=0)
+    last_accessed_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookBookmarkTag(SQLModel, table=True):
+    __tablename__ = "spy_look_bookmark_tags"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+    color: str = Field(default="#64748b")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookBookmarkTagLink(SQLModel, table=True):
+    __tablename__ = "spy_look_bookmark_tag_links"
+
+    bookmark_id: int = Field(primary_key=True, foreign_key="spy_look_bookmarks.id")
+    tag_id: int = Field(primary_key=True, foreign_key="spy_look_bookmark_tags.id", index=True)
+
+
+class SpyLookBookmarkAccessLog(SQLModel, table=True):
+    __tablename__ = "spy_look_bookmark_access_logs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    bookmark_id: int = Field(foreign_key="spy_look_bookmarks.id", index=True)
+    accessed_at: datetime = Field(default_factory=datetime.utcnow, index=True)

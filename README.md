@@ -8,7 +8,25 @@
 
 ## 快速开始
 
-**环境**：Python ≥ 3.13（推荐 [uv](https://docs.astral.sh/uv/)），Node.js（前端开发时）
+**环境**：Python ≥ 3.13（推荐 [uv](https://docs.astral.sh/uv/)），Node.js（前端开发时）；或 Docker / Docker Compose。
+
+### Docker 一键部署（推荐）
+
+```bash
+# 可选：复制端口配置
+cp .env.example .env
+
+docker compose up -d --build
+# → http://127.0.0.1:8000
+```
+
+数据（SQLite、工具配置）持久化在 Docker volume `spy-look-data`。图片工具需把 ONNX 模型放到仓库根目录 `models/`（已挂载进容器），例如：
+
+- `ch_PP-OCRv6_det_small.onnx` / `ch_PP-OCRv6_rec_small.onnx`
+- `pp_formulanet_plus_m.onnx`
+- `pp_doclayoutv3.onnx`
+
+镜像已内置 `ffmpeg`；视频转写的 ASR Key 等仍在控制台「工具配置」中设置。
 
 ### 仅后端（静态 UI 已构建时）
 
@@ -162,6 +180,9 @@ spy-look/
 │   ├── db/              # 共享 SQLite
 │   └── tools/           # gateway / video_tools / doc_tools / …
 ├── ui/                  # Vue 控制台 → ui/dist 静态托管
+├── models/              # 图片工具 ONNX（gitignore，Docker 挂载）
+├── Dockerfile
+├── docker-compose.yml
 ├── screenshots/
 ├── boot.bat             # Windows 一键开发启动
 └── openspec/

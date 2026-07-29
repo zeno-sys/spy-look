@@ -15,6 +15,7 @@
             drag
             :auto-upload="false"
             :limit="1"
+            v-model:file-list="fileList"
             accept=".png,.jpg,.jpeg,.webp,.bmp,image/png,image/jpeg,image/webp,image/bmp"
             :on-change="onFileChange"
             :on-remove="onFileRemove"
@@ -22,7 +23,7 @@
           >
             <div class="upload-compact-inner">
               <el-icon class="upload-compact-icon"><UploadFilled /></el-icon>
-              <span class="el-upload__text">拖拽或 <em>点击选择</em> 文档图</span>
+              <span class="el-upload__text">拖拽、点击或 <em>Ctrl+V 粘贴</em> 文档图</span>
               <span class="el-upload__tip">png / jpg / webp / bmp，≤10 MB</span>
             </div>
           </el-upload>
@@ -146,13 +147,16 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { UploadFile } from 'element-plus'
+import type { UploadFile, UploadUserFile } from 'element-plus'
 import { ArrowRight, UploadFilled } from '@element-plus/icons-vue'
+import { useImagePasteUpload } from '../../composables/useImagePasteUpload'
 import LayoutCanvas from './LayoutCanvas.vue'
 import type { LayoutResult } from './LayoutCanvas.vue'
 
 const selectedFile = ref<File | null>(null)
+const fileList = ref<UploadUserFile[]>([])
 const processing = ref(false)
+useImagePasteUpload(selectedFile, fileList, { disabled: processing })
 const result = ref<LayoutResult | null>(null)
 const previewExpanded = ref(true)
 const showBoxes = ref(true)
@@ -191,6 +195,7 @@ function onFileChange(file: UploadFile) {
 
 function onFileRemove() {
   selectedFile.value = null
+  fileList.value = []
 }
 
 function selectItem(id: number) {

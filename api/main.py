@@ -13,6 +13,7 @@ from errors import openai_error_response
 from tools.agent_resources.router import router as agent_resources_router
 from tools.auth.middleware import ConsoleAuthMiddleware
 from tools.auth.router import router as auth_router
+from tools.bookmarks.router import router as bookmarks_router
 from tools.doc_tools.router import router as doc_tools_router
 from tools.gateway.router import router as gateway_tool_router
 from tools.image_tools.router import router as image_tools_router
@@ -30,7 +31,19 @@ async def lifespan(app: FastAPI):
     ensure_config()
     ensure_settings_config()
 
+    # Prune old bookmark access logs (keep 30 days for 7-day TOP5 buffer)
+    async def _prune_access_logs():
+        from db.bookmarks import prune_old_access_logs
+        from db.engine import async_engine, async_session_factory
+
+        async with async_session_factory(async_engine) as session:
+            await prune_old_access_logs(session, days=30)
+
     app.state._log_tasks: set[asyncio.Task] = set()
+    prune_task = asyncio.create_task(_prune_access_logs())
+    app.state._log_tasks.add(prune_task)
+    prune_task.add_done_callback(app.state._log_tasks.discard)
+
     try:
         yield
     finally:
@@ -58,6 +71,7 @@ app.include_router(doc_tools_router)
 app.include_router(image_tools_router)
 app.include_router(agent_resources_router)
 app.include_router(settings_router)
+app.include_router(bookmarks_router)
 
 
 @app.get("/healthz")

@@ -30,10 +30,18 @@ if sys.platform == "win32":
 
 _progress_cb: ContextVar[Callable[[str], None] | None] = ContextVar("progress_cb", default=None)
 
+def _resolve_ffmpeg(configured: str) -> str:
+    path = (configured or "").strip()
+    if path:
+        return path
+    found = shutil.which("ffmpeg")
+    return found or "ffmpeg"
+
+
 _cfg = load_config()
 _asr = _cfg["asr"]
 
-FFMPEG_PATH = _cfg["ffmpeg_path"]
+FFMPEG_PATH = _resolve_ffmpeg(_cfg["ffmpeg_path"])
 os.environ["FFMPEG_BINARY"] = FFMPEG_PATH
 
 MAX_CHUNK_SEC = float(_asr["max_chunk_sec"])
@@ -56,7 +64,7 @@ def refresh_config() -> None:
 
     _cfg = reload_config()
     _asr = _cfg["asr"]
-    FFMPEG_PATH = _cfg["ffmpeg_path"]
+    FFMPEG_PATH = _resolve_ffmpeg(_cfg["ffmpeg_path"])
     os.environ["FFMPEG_BINARY"] = FFMPEG_PATH
     MAX_CHUNK_SEC = float(_asr["max_chunk_sec"])
     MAX_FILE_BYTES = int(_asr["max_file_bytes"])

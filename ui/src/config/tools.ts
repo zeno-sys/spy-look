@@ -102,4 +102,17 @@ export const tools: ToolDefinition[] = [
     homePath: '/agent-resources/skills',
     menuItems: [{ path: '/agent-resources/skills', title: 'Skills 管理' }],
   },
+  {
+    id: 'bookmarks',
+    title: '网页收藏',
+    description: '统一管理浏览器书签：分组、标签、置顶、搜索，7 日高频 TOP5。',
+    icon: 'CollectionTag',
+    accent: {
+      gradient: 'linear-gradient(135deg, #0891b2 0%, #0e7490 100%)',
+      surface: 'linear-gradient(160deg, #ecfeff 0%, #cffafe 100%)',
+      iconColor: '#0e7490',
+    },
+    homePath: '/bookmarks/manage',
+    menuItems: [{ path: '/bookmarks/manage', title: '书签管理' }],
+  },
 ]

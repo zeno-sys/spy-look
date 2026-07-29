@@ -16,6 +16,7 @@ import ImageFormulaView from '../views/image_tools/ImageFormulaView.vue'
 import ImageLayoutView from '../views/image_tools/ImageLayoutView.vue'
 import SettingsView from '../views/settings/SettingsView.vue'
 import SkillsManageView from '../views/agent_resources/SkillsManageView.vue'
+import BookmarksManageView from '../views/bookmarks/BookmarksManageView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 import SetupView from '../views/auth/SetupView.vue'
 import LocalResetView from '../views/auth/LocalResetView.vue'
@@ -80,6 +81,12 @@ const routes = [
         path: 'agent-resources/skills',
         name: 'agentResourcesSkills',
         component: SkillsManageView,
+      },
+      { path: 'bookmarks', redirect: '/bookmarks/manage' },
+      {
+        path: 'bookmarks/manage',
+        name: 'bookmarksManage',
+        component: BookmarksManageView,
       },
     ],
   },

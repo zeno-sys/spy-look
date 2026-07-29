@@ -56,4 +56,7 @@ tempCodeRunnerFile.py
 ui/node_modules/
 ui/dist/
 
-models/
+models/*
+!models/.gitkeep
+
+.workbuddy/

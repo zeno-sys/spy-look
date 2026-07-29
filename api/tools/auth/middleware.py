@@ -22,6 +22,7 @@ MANAGEMENT_PREFIXES = (
     "/image-tools/",
     "/agent-resources/",
     "/settings/",
+    "/bookmarks/",
 )
 
 
