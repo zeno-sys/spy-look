@@ -13,7 +13,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "spy_look.db"
 DB_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
-# 视频工具运行时配置（由管理界面读写，不入库）
+# 媒体工具运行时配置（由管理界面读写，不入库）
 VIDEO_TOOLS_CONFIG_PATH = DATA_DIR / "video_tools_config.json"
 
 # 全局设置（大模型等，由设置页读写，不入库）

@@ -106,10 +106,12 @@ async def _download_video_url(
     dest: Path,
     max_bytes: int,
     on_progress: Callable[[str], None] | None = None,
+    *,
+    type_label: str = "视频",
 ) -> None:
     parsed = urlparse(url.strip())
     if parsed.scheme not in ("http", "https"):
-        raise ValueError("仅支持 http/https 视频链接")
+        raise ValueError(f"仅支持 http/https {type_label}链接")
 
     headers = _download_headers(url)
     async with httpx.AsyncClient(
@@ -124,7 +126,7 @@ async def _download_video_url(
             content_length = response.headers.get("content-length")
             if content_length and int(content_length) > max_bytes:
                 raise ValueError(
-                    f"视频文件超过大小上限 ({int(content_length) / (1024 * 1024):.1f} MB > "
+                    f"{type_label}文件超过大小上限 ({int(content_length) / (1024 * 1024):.1f} MB > "
                     f"{max_bytes / (1024 * 1024):.0f} MB)"
                 )
 
@@ -135,33 +137,38 @@ async def _download_video_url(
                     total += len(chunk)
                     if total > max_bytes:
                         raise ValueError(
-                            f"视频文件超过大小上限 ({max_bytes / (1024 * 1024):.0f} MB)"
+                            f"{type_label}文件超过大小上限 ({max_bytes / (1024 * 1024):.0f} MB)"
                         )
                     f.write(chunk)
                     if on_progress:
                         mb = total // (1024 * 1024)
                         if mb > last_report_mb:
                             last_report_mb = mb
-                            on_progress(f"正在下载视频... 已下载 {mb} MB")
+                            on_progress(f"正在下载{type_label}... 已下载 {mb} MB")
 
     if on_progress:
         size_mb = dest.stat().st_size / (1024 * 1024)
-        on_progress(f"视频下载完成 ({size_mb:.1f} MB)")
+        on_progress(f"{type_label}下载完成 ({size_mb:.1f} MB)")
 
 
 async def _save_upload_file(
     upload: UploadFile,
     dest: Path,
     on_progress: Callable[[str], None] | None = None,
+    *,
+    allowed_exts: set[str] | None = None,
+    type_label: str = "视频",
 ) -> None:
+    allowed_exts = allowed_exts or {".mp4"}
     filename = (upload.filename or "").lower()
-    if not filename.endswith(".mp4"):
-        raise ValueError("仅支持 .mp4 文件")
+    if not any(filename.endswith(ext) for ext in allowed_exts):
+        supported = "、".join(sorted(allowed_exts))
+        raise ValueError(f"仅支持 {supported} 格式文件")
 
     max_bytes = MAX_DOWNLOAD_BYTES
     total = 0
     if on_progress:
-        on_progress(f"正在接收上传文件: {upload.filename}")
+        on_progress(f"正在接收上传{type_label}文件: {upload.filename}")
 
     with dest.open("wb") as f:
         while True:
@@ -177,7 +184,7 @@ async def _save_upload_file(
 
     if on_progress:
         size_mb = dest.stat().st_size / (1024 * 1024)
-        on_progress(f"文件接收完成 ({size_mb:.1f} MB)")
+        on_progress(f"{type_label}文件接收完成 ({size_mb:.1f} MB)")
 
 
 def _sse_event(event: str, data: dict[str, Any]) -> str:
@@ -203,6 +210,28 @@ async def _parse_request_input(
     raise HTTPException(
         status_code=400,
         detail="请使用 multipart/form-data 上传文件或 application/json 提交 url",
+    )
+
+
+async def _parse_audio_request_input(
+    request: Request,
+) -> tuple[UploadFile | None, str | None]:
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not isinstance(upload, UploadFile):
+            raise HTTPException(status_code=400, detail="请上传 file 字段（音频文件）")
+        return upload, None
+    if "application/json" in content_type:
+        body = VoiceToTextUrlRequest.model_validate(await request.json())
+        url = body.url.strip()
+        if not url:
+            raise HTTPException(status_code=400, detail="url 不能为空")
+        return None, url
+    raise HTTPException(
+        status_code=400,
+        detail="请使用 multipart/form-data 上传音频文件或 application/json 提交 url",
     )
 
 
@@ -252,6 +281,80 @@ async def voice_to_text_stream(request: Request) -> StreamingResponse:
                 await queue.put(("error", {"detail": str(exc)}))
             finally:
                 mp4_path.unlink(missing_ok=True)
+                await queue.put(("__close__", {}))
+
+        task = asyncio.create_task(run_job())
+        try:
+            while True:
+                event, data = await queue.get()
+                if event == "__close__":
+                    break
+                yield _sse_event(event, data)
+                if event in ("done", "error"):
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+                with asyncio.suppress(asyncio.CancelledError):
+                    await task
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/audio-to-text")
+async def audio_to_text_stream(request: Request) -> StreamingResponse:
+    upload, audio_url = await _parse_audio_request_input(request)
+
+    async def event_stream() -> AsyncIterator[str]:
+        queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def on_progress(message: str) -> None:
+            loop.call_soon_threadsafe(
+                queue.put_nowait, ("progress", {"message": message})
+            )
+
+        async def run_job() -> None:
+            # 临时文件尽量保留原始音频扩展名，避免转写服务按扩展名校验失败
+            suffix = ".audio"
+            if upload is not None:
+                ext = Path(upload.filename or "").suffix.lower()
+                if ext in voice_to_text.SUPPORTED_AUDIO_SUFFIXES:
+                    suffix = ext
+            elif audio_url:
+                ext = Path(urlparse(audio_url).path).suffix.lower()
+                if ext in voice_to_text.SUPPORTED_AUDIO_SUFFIXES:
+                    suffix = ext
+
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            audio_path = Path(tmp.name)
+            tmp.close()
+            try:
+                if upload is not None:
+                    await _save_upload_file(
+                        upload,
+                        audio_path,
+                        on_progress,
+                        allowed_exts=voice_to_text.SUPPORTED_AUDIO_SUFFIXES,
+                        type_label="音频",
+                    )
+                else:
+                    await _download_video_url(
+                        audio_url or "",
+                        audio_path,
+                        MAX_DOWNLOAD_BYTES,
+                        on_progress,
+                        type_label="音频",
+                    )
+
+                reload_config()
+                voice_to_text.refresh_config()
+                text = await voice_to_text.audio_to_text(str(audio_path), progress=on_progress)
+                await queue.put(("done", {"text": text}))
+            except Exception as exc:
+                await queue.put(("error", {"detail": str(exc)}))
+            finally:
+                audio_path.unlink(missing_ok=True)
                 await queue.put(("__close__", {}))
 
         task = asyncio.create_task(run_job())

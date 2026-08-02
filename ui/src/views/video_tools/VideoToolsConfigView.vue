@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <div><h3>视频工具 · 工具配置</h3></div>
+      <div><h3>媒体工具 · 工具配置</h3></div>
       <div class="header-actions">
         <el-button type="primary" @click="loadConfig">刷新</el-button>
       </div>

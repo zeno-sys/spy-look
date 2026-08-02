@@ -41,8 +41,8 @@ export const tools: ToolDefinition[] = [
   },
   {
     id: 'video-tools',
-    title: '视频工具',
-    description: '视频处理工具集：视频转文字等。',
+    title: '媒体工具',
+    description: '媒体处理工具集：视频转文字、音频转文字等。',
     icon: 'VideoCamera',
     accent: {
       gradient: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
@@ -53,6 +53,7 @@ export const tools: ToolDefinition[] = [
     menuItems: [
       { path: '/video-tools/config', title: '工具配置' },
       { path: '/video-tools/voice-to-text', title: '视频转文字' },
+      { path: '/video-tools/audio-to-text', title: '音频转文字' },
     ],
   },
   {

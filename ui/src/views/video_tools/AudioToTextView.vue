@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <div><h3>媒体工具 · 视频转文字</h3></div>
+      <div><h3>媒体工具 · 音频转文字</h3></div>
       <div class="header-actions">
         <el-button @click="goToConfig">工具配置</el-button>
       </div>
@@ -9,53 +9,40 @@
 
     <div class="page-body">
       <el-card class="section-card">
-        <template #header><span>输入视频</span></template>
+        <template #header><span>输入音频</span></template>
         <el-radio-group v-model="inputMode" :disabled="processing">
-          <el-radio-button value="page">页面链接</el-radio-button>
           <el-radio-button value="upload">上传文件</el-radio-button>
-          <el-radio-button value="url">视频链接</el-radio-button>
+          <el-radio-button value="url">音频链接</el-radio-button>
         </el-radio-group>
 
         <el-row :gutter="16" class="input-row">
           <el-col :xs="24" :md="16">
-            <div v-if="inputMode === 'page'" class="input-area">
-              <el-input
-                v-model="pageUrl"
-                placeholder="https://www.bilibili.com/video/BV... 或 YouTube 分享链接"
-                :disabled="processing"
-                clearable
-              />
-              <p class="hint">
-                粘贴哔哩哔哩、YouTube、抖音等平台的视频页面链接，系统将自动解析并下载后转写。
-              </p>
-            </div>
-
-            <div v-else-if="inputMode === 'upload'" class="input-area input-area--upload">
+            <div v-if="inputMode === 'upload'" class="input-area input-area--upload">
               <el-upload
                 drag
                 :auto-upload="false"
                 :limit="1"
-                accept=".mp4,video/mp4"
+                :accept="audioAccept"
                 :on-change="onFileChange"
                 :on-remove="onFileRemove"
                 :disabled="processing"
               >
                 <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-                <div class="el-upload__text">拖拽 MP4 到此处，或 <em>点击选择</em></div>
+                <div class="el-upload__text">拖拽音频到此处，或 <em>点击选择</em></div>
                 <template #tip>
-                  <div class="el-upload__tip">仅支持 .mp4 格式</div>
+                  <div class="el-upload__tip">支持 MP3 / WAV / M4A / FLAC / AAC / OGG 等常见音频格式</div>
                 </template>
               </el-upload>
             </div>
 
             <div v-else class="input-area">
               <el-input
-                v-model="videoUrl"
-                placeholder="https://example.com/video.mp4"
+                v-model="audioUrl"
+                placeholder="https://example.com/audio.mp3"
                 :disabled="processing"
                 clearable
               />
-              <p class="hint">粘贴 MP4 直链，非哔哩哔哩/抖音等网页分享链接。</p>
+              <p class="hint">粘贴音频文件直链（mp3 / wav / m4a 等），服务端下载后转写。</p>
             </div>
 
             <el-button
@@ -71,19 +58,14 @@
 
           <el-col :xs="24" :md="8">
             <div class="side-panel">
-              <div class="side-panel-title">备用解析方式</div>
+              <div class="side-panel-title">使用说明</div>
               <p class="hint">
-                「页面链接」使用内置 yt-dlp 自动解析下载。若解析或下载失败，可尝试下方在线工具提取
-                MP4 直链或下载到本地，再切换到「上传文件」或「视频链接」继续转写。
+                上传本地音频或粘贴音频直链，系统将提取音频并转写为文字。
+                长音频会自动按静音切分、并行识别，完成后可一键复制或生成提示词版本。
               </p>
               <ul class="tool-links">
                 <li>
-                  <a href="https://greenvideo.cc/" target="_blank" rel="noopener noreferrer">GreenVideo</a>
-                  <span class="tool-desc">多平台解析下载</span>
-                </li>
-                <li>
-                  <a href="https://peanutdl.com/zh" target="_blank" rel="noopener noreferrer">PeanutDL</a>
-                  <span class="tool-desc">在线视频解析下载</span>
+                  <span class="tool-desc">转写参数（模型、切分阈值等）可在「工具配置」中调整。</span>
                 </li>
               </ul>
             </div>
@@ -131,10 +113,12 @@ import { apiGet, apiStreamPost } from '../../composables/useApi'
 
 const router = useRouter()
 
-const inputMode = ref<'upload' | 'url' | 'page'>('page')
+const audioAccept =
+  '.mp3,.wav,.m4a,.flac,.aac,.ogg,.opus,.wma,.aiff,.aif,.amr,audio/*'
+
+const inputMode = ref<'upload' | 'url'>('upload')
 const selectedFile = ref<File | null>(null)
-const videoUrl = ref('')
-const pageUrl = ref('')
+const audioUrl = ref('')
 const processing = ref(false)
 const progressLog = ref('')
 const progressScrollbarRef = ref<ScrollbarInstance>()
@@ -143,8 +127,7 @@ const resultText = ref<string | null>(null)
 const canStart = computed(() => {
   if (processing.value) return false
   if (inputMode.value === 'upload') return !!selectedFile.value
-  if (inputMode.value === 'url') return !!videoUrl.value.trim()
-  return !!pageUrl.value.trim()
+  return !!audioUrl.value.trim()
 })
 
 function onFileChange(file: UploadFile) {
@@ -221,25 +204,23 @@ async function startTranscribe() {
     let body: FormData | { url: string; url_type?: 'direct' | 'page' }
     if (inputMode.value === 'upload') {
       if (!selectedFile.value) {
-        ElMessage.warning('请先选择 MP4 文件')
+        ElMessage.warning('请先选择音频文件')
         return
       }
       const formData = new FormData()
       formData.append('file', selectedFile.value)
       body = formData
-    } else if (inputMode.value === 'page') {
-      body = { url: pageUrl.value.trim(), url_type: 'page' }
     } else {
-      body = { url: videoUrl.value.trim(), url_type: 'direct' }
+      body = { url: audioUrl.value.trim(), url_type: 'direct' }
     }
 
-    await apiStreamPost('/video-tools/admin/voice-to-text', body, (event, data) => {
+    await apiStreamPost('/video-tools/admin/audio-to-text', body, (event, data) => {
       if (event === 'progress' && typeof data.message === 'string') {
         appendLog(data.message)
       } else if (event === 'done' && typeof data.text === 'string') {
         resultText.value = data.text
         appendLog('转写完成')
-        ElMessage.success('视频转文字完成')
+        ElMessage.success('音频转文字完成')
       } else if (event === 'error') {
         const detail = typeof data.detail === 'string' ? data.detail : '转写失败'
         appendLog(`错误: ${detail}`)
@@ -264,7 +245,7 @@ async function copyToClipboard(text: string, successMsg: string) {
 }
 
 function buildNotesPrompt(transcript: string): string {
-  return `以下是一段视频的语音转写文本。请根据内容生成一份详细、结构化的学习笔记，可直接用于复习与查阅。
+  return `以下是一段音频的语音转写文本。请根据内容生成一份详细、结构化的学习笔记，可直接用于复习与查阅。
 
 要求：
 1. 提炼核心观点、关键结论与重要定义
@@ -356,16 +337,6 @@ async function copyPromptVersion() {
 
 .tool-links li + li {
   margin-top: 6px;
-}
-
-.tool-links a {
-  color: var(--el-color-primary);
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.tool-links a:hover {
-  text-decoration: underline;
 }
 
 .tool-desc {

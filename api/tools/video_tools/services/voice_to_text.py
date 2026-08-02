@@ -54,6 +54,12 @@ DEFAULT_ASR_MODEL = _asr["model"]
 base_url = _asr["base_url"]
 api_key = _asr["api_key"]
 
+# 音频转文字支持的常见音频格式
+SUPPORTED_AUDIO_SUFFIXES = {
+    ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus",
+    ".wma", ".aiff", ".aif", ".amr", ".mka",
+}
+
 
 def refresh_config() -> None:
     """重新加载运行时配置并刷新模块级变量。"""
@@ -134,9 +140,9 @@ async def voice_to_text(
     model = model or DEFAULT_ASR_MODEL
 
     if not base_url or not api_key:
-        raise ValueError("请在「视频工具 · 工具配置」中设置 asr.base_url 和 asr.api_key")
+        raise ValueError("请在「媒体工具 · 工具配置」中设置 asr.base_url 和 asr.api_key")
     if not model:
-        raise ValueError("请在「视频工具 · 工具配置」中设置 asr.model")
+        raise ValueError("请在「媒体工具 · 工具配置」中设置 asr.model")
 
     url = f"{base_url}/audio/transcriptions"
     headers = {"Authorization": f"Bearer {api_key}"}
@@ -273,19 +279,28 @@ async def long_audio_to_text(
         shutil.rmtree(chunk_dir, ignore_errors=True)
 
 
-async def mp4_to_text(
-    mp4_path: str,
+async def _media_to_text(
+    media_path: str,
+    allowed_suffixes: set[str],
+    type_label: str,
     model: str | None = None,
     max_workers: int | None = None,
     *,
     progress: Callable[[str], None] | None = None,
+    strict_ext: bool = True,
 ) -> str:
-    """输入 MP4 路径，输出识别文字。"""
-    mp4_path = Path(mp4_path)
-    if not mp4_path.exists():
-        raise FileNotFoundError(f"文件不存在: {mp4_path}")
-    if mp4_path.suffix.lower() != ".mp4":
-        raise ValueError(f"仅支持 MP4 文件: {mp4_path}")
+    """通用转写入口：音视频文件 → WAV → 归一化 → VAD 切分并行 ASR。
+
+    strict_ext=True 时扩展名必须在 allowed_suffixes 内，否则报错；
+    strict_ext=False 时扩展名仅作提示，实际格式交由 ffmpeg/moviepy 内容探测
+    （用于上传/直链保存后扩展名不可靠的场景）。
+    """
+    media_path_obj = Path(media_path)
+    if not media_path_obj.exists():
+        raise FileNotFoundError(f"文件不存在: {media_path_obj}")
+    if strict_ext and media_path_obj.suffix.lower() not in allowed_suffixes:
+        supported = "、".join(sorted(allowed_suffixes))
+        raise ValueError(f"仅支持 {supported} 格式: {media_path_obj}")
 
     token = _progress_cb.set(progress) if progress else None
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -293,7 +308,7 @@ async def mp4_to_text(
 
     normalized_path: str | None = None
     try:
-        await asyncio.to_thread(video_to_wav, str(mp4_path), wav_path, progress=progress)
+        await asyncio.to_thread(video_to_wav, str(media_path_obj), wav_path, progress=progress)
         _emit("归一化音频: 16kHz 单声道...", progress=progress)
         normalized_path = await asyncio.to_thread(normalize_wav_for_asr, wav_path)
         _emit("开始语音识别...", progress=progress)
@@ -304,3 +319,43 @@ async def mp4_to_text(
             Path(normalized_path).unlink(missing_ok=True)
         if token is not None:
             _progress_cb.reset(token)
+
+
+async def mp4_to_text(
+    mp4_path: str,
+    model: str | None = None,
+    max_workers: int | None = None,
+    *,
+    progress: Callable[[str], None] | None = None,
+) -> str:
+    """输入 MP4 路径，输出识别文字。"""
+    return await _media_to_text(
+        mp4_path,
+        {".mp4"},
+        "MP4 视频",
+        model=model,
+        max_workers=max_workers,
+        progress=progress,
+    )
+
+
+async def audio_to_text(
+    audio_path: str,
+    model: str | None = None,
+    max_workers: int | None = None,
+    *,
+    progress: Callable[[str], None] | None = None,
+) -> str:
+    """输入音频文件路径（MP3/WAV/M4A/FLAC/AAC/OGG 等），输出识别文字。
+
+    扩展名仅作提示，实际格式由 ffmpeg/moviepy 探测，兼容临时文件无正确后缀的场景。
+    """
+    return await _media_to_text(
+        audio_path,
+        SUPPORTED_AUDIO_SUFFIXES,
+        "音频",
+        model=model,
+        max_workers=max_workers,
+        progress=progress,
+        strict_ext=False,
+    )
