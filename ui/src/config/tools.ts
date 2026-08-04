@@ -120,4 +120,19 @@ export const tools: ToolDefinition[] = [
       { path: '/bookmarks/web-clips', title: '剪藏快照' },
     ],
   },
+  {
+    id: 'algorithm',
+    title: '算法练习',
+    description: '算法题管理、Python 在线运行、思路记录与标签筛选。',
+    icon: 'Cpu',
+    accent: {
+      gradient: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+      surface: 'linear-gradient(160deg, #f5f3ff 0%, #ede9fe 100%)',
+      iconColor: '#6d28d9',
+    },
+    homePath: '/algorithm/problems',
+    menuItems: [
+      { path: '/algorithm/problems', title: '题目列表' },
+    ],
+  },
 ]

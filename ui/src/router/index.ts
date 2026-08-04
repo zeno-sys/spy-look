@@ -20,6 +20,8 @@ import SkillsManageView from '../views/agent_resources/SkillsManageView.vue'
 import BookmarksManageView from '../views/bookmarks/BookmarksManageView.vue'
 import ReadLaterView from '../views/read_later/ReadLaterView.vue'
 import WebClipsView from '../views/web_clips/WebClipsView.vue'
+import ProblemListView from '../views/algorithm_practice/ProblemListView.vue'
+import PracticeView from '../views/algorithm_practice/PracticeView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 import SetupView from '../views/auth/SetupView.vue'
 import LocalResetView from '../views/auth/LocalResetView.vue'
@@ -101,6 +103,17 @@ const routes = [
         path: 'bookmarks/web-clips',
         name: 'bookmarksWebClips',
         component: WebClipsView,
+      },
+      { path: 'algorithm', redirect: '/algorithm/problems' },
+      {
+        path: 'algorithm/problems',
+        name: 'algorithmProblems',
+        component: ProblemListView,
+      },
+      {
+        path: 'algorithm/practice',
+        name: 'algorithmPractice',
+        component: PracticeView,
       },
     ],
   },

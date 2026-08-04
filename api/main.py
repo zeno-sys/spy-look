@@ -11,6 +11,7 @@ from config import UI_DIR
 from db.engine import init_db
 from errors import openai_error_response
 from tools.agent_resources.router import router as agent_resources_router
+from tools.algorithm_practice.router import router as algorithm_practice_router
 from tools.auth.middleware import ConsoleAuthMiddleware
 from tools.auth.router import router as auth_router
 from tools.bookmarks.router import router as bookmarks_router
@@ -76,6 +77,7 @@ app.include_router(settings_router)
 app.include_router(bookmarks_router)
 app.include_router(read_later_router)
 app.include_router(web_clips_router)
+app.include_router(algorithm_practice_router)
 
 
 @app.get("/healthz")

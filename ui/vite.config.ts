@@ -22,6 +22,7 @@ export default defineConfig({
       '/doc-tools/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/image-tools/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/bookmarks/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/algorithm/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/agent-resources/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/settings/admin': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/healthz': { target: 'http://127.0.0.1:8000', changeOrigin: true },

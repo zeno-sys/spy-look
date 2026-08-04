@@ -262,3 +262,35 @@ class SpyLookWebClip(SQLModel, table=True):
         default=None, foreign_key="spy_look_bookmarks.id", index=True
     )
     fetched_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# --------------------------------------------------------------------------- #
+# Algorithm Practice
+# --------------------------------------------------------------------------- #
+
+class SpyLookAlgorithmProblem(SQLModel, table=True):
+    __tablename__ = "spy_look_algorithm_problems"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(index=True)
+    description: str = Field(default="", sa_column=Column(Text, nullable=False))
+    solution_code: str = Field(default="", sa_column=Column(Text, nullable=False))
+    thought: str = Field(default="", sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookAlgorithmTag(SQLModel, table=True):
+    __tablename__ = "spy_look_algorithm_tags"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+    color: str = Field(default="#64748b")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SpyLookAlgorithmTagLink(SQLModel, table=True):
+    __tablename__ = "spy_look_algorithm_tag_links"
+
+    problem_id: int = Field(primary_key=True, foreign_key="spy_look_algorithm_problems.id")
+    tag_id: int = Field(primary_key=True, foreign_key="spy_look_algorithm_tags.id", index=True)
